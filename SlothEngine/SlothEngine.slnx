@@ -5,5 +5,5 @@
   <Folder Name="/ソリューション項目/">
     <File Path=".editorconfig" />
   </Folder>
-  <Project Path="SlothEngine.vcxproj" />
+  <Project Path="SlothEngine.vcxproj" Id="a5247a8c-2fc7-4cfe-aee9-81d98016c3db" />
 </Solution>
