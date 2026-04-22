@@ -42,7 +42,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		OutputDebugStringA(message.c_str());
 	}
 
-
+	void Log(const std::wstring& message) {
+		OutputDebugStringW(message.c_str());
+	}
 
 	//Windowsアプリでのエントリーポイント(main関数)
 	int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -77,7 +79,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 			if (!(adapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
 				// 採用したアダプタの情報をログに出力
 				Log(std::format(L"Use Adapater : {}\n", adapterDesc.Description));
-				Log(ConverString(std::format(L"Use Adapater : {}\n", adapterDesc.Description)));
 				break;
 			}
 
@@ -110,6 +111,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		assert(device != nullptr);
 		Log("Complete create D3D12Device!!!\n");
 
+		WNDCLASS wc{};
+
+		wc.lpfnWndProc = WindowProc;
 		//ウィンドウクラス名(なんでも良い)
 		wc.lpszClassName = L"CG2WindowClass";
 		//インスタンスハンドル
