@@ -13,9 +13,12 @@
 #include<dxgi1_6.h>
 #include<cassert>
 
+#include<dbghelp.h>
+
+
 #pragma comment(lib,"d3d12.lib")
 #pragma comment(lib,"dxgi.lib")
-
+#pragma comment(lib, "dbghelp.lib")
 
 //ウィンドウプロージャ
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -172,7 +175,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		std::string texturePath = "player.png";
 
 		//ログのディレクトリを用意
-		std::filesystem::create_directory("Logs");
+		std::filesystem::create_directory("logs");
 		//現在時刻を取得
 		std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
 		//ログファイルの名前にコンマ何秒はいらないので秒単位に変換
@@ -183,7 +186,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		//formatを使って年月日_時分秒の形式に変換
 		std::string dateString = std::format("{:%Y%m%d_%H%M%S}", localTime);
 		//時刻を使ってファイル名を決定
-		std::string logFilePath = std::string("Logs/log_") + dateString + ".log";
+		std::string logFilePath = std::string("logs/log_") + dateString + ".log";
 		//ファイルを作って書き込み準備
 		std::ofstream logFile(logFilePath);
 
@@ -191,7 +194,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		MSG msg{};
 
 		//ログ出力
-		Log(std::format("enemyHp:{}, texturePath:{}\n", enemyHp, texturePath));
+		Log(logFile, std::format("enemyHp:{}, texturePath:{}\n", enemyHp, texturePath));
 
 		//ウィンドウの×ボタンが押されるまでループする
 		while (msg.message != WM_QUIT) {
