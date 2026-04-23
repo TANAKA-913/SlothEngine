@@ -12,6 +12,7 @@
 #include<d3d12.h>
 #include<dxgi1_6.h>
 #include<cassert>
+#include <strsafe.h>
 
 #include<dbghelp.h>
 
@@ -30,6 +31,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		PostQuitMessage(0);
 		return 0;
 	}
+
 	//標準のメッセージ処理を行う
 	return DefWindowProc(hwnd, msg, wparam, lparam);
 }
@@ -49,10 +51,42 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		OutputDebugStringW(message.c_str());
 	}
 
+	static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
+		// 時刻を取得して、時刻を名前に入れたファイルを作成。Dumpsディレクトリ以下に出力
+		SYSTEMTIME time;
+		GetLocalTime(&time);
+
+		wchar_t filePath[MAX_PATH] = { 0 };
+		CreateDirectory(L"./Dumps", nullptr);
+
+		StringCchPrintfW(filePath,MAX_PATH,L"./Dumps/%04d-%02d%02d-%02d%02d.dmp",time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute);
+
+		HANDLE dumpFileHandle = CreateFile(filePath,GENERIC_WRITE,FILE_SHARE_WRITE | FILE_SHARE_READ,0,CREATE_ALWAYS,0,0);
+
+		// processId（このexeのId）とクラッシュ（例外）の発生したthreadIdを取得
+		DWORD processId = GetCurrentProcessId();
+		DWORD threadId = GetCurrentThreadId();
+
+		// 設定情報を入力
+		MINIDUMP_EXCEPTION_INFORMATION minidumpInformation{ 0 };
+		minidumpInformation.ThreadId = threadId;
+		minidumpInformation.ExceptionPointers = exception;
+		minidumpInformation.ClientPointers = TRUE;
+
+		// Dumpを出力。MiniDumpNormalは最低限の情報を出力するフラグ
+		MiniDumpWriteDump(
+			GetCurrentProcess(),processId,dumpFileHandle,MiniDumpNormal,&minidumpInformation,nullptr,nullptr
+		);
+
+		// 他に関連づけられているSEH例外ハンドラがあれば実行。通常はプロセスを終了する
+		return EXCEPTION_EXECUTE_HANDLER;
+	}
+
 	//Windowsアプリでのエントリーポイント(main関数)
 	int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
-
+		// 誰も捕捉しなかった場合に(Unhandled)、捕捉する関数を登録
+		SetUnhandledExceptionFilter(ExportDump);
 
 		// DXGIファクトリー
 		IDXGIFactory7* dxgiFactory = nullptr;
@@ -195,7 +229,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 
 		//ログ出力
 		Log(logFile, std::format("enemyHp:{}, texturePath:{}\n", enemyHp, texturePath));
-
+		uint32_t* p = nullptr;
+		*p = 100;
 		//ウィンドウの×ボタンが押されるまでループする
 		while (msg.message != WM_QUIT) {
 			//Window にメッセージが来ていたら最優先で処理する
