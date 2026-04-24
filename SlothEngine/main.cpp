@@ -214,7 +214,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
 		//ログファイルの名前にコンマ何秒はいらないので秒単位に変換
 		std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>
-			nowSeconds = std::chrono::time_point_cast<std::chrono::seconds>(now);
+		nowSeconds = std::chrono::time_point_cast<std::chrono::seconds>(now);
 		//日本時間に変換
 		std::chrono::zoned_time localTime{ std::chrono::current_zone(), nowSeconds };
 		//formatを使って年月日_時分秒の形式に変換
@@ -229,8 +229,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 
 		//ログ出力
 		Log(logFile, std::format("enemyHp:{}, texturePath:{}\n", enemyHp, texturePath));
-		uint32_t* p = nullptr;
-		*p = 100;
 		//ウィンドウの×ボタンが押されるまでループする
 		while (msg.message != WM_QUIT) {
 			//Window にメッセージが来ていたら最優先で処理する
@@ -240,7 +238,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 			}
 			else {
 				//ゲームの処理
-
+				Log(logFile, std::format("Loop running...\n"));
 
 			}
 		}
