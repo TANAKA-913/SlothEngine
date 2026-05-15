@@ -151,16 +151,16 @@ IDxcBlob* CompileShader(
 		assert(false);
 	}
 	// コンパイル結果から実行用のバイナリ部分を取得
-IDxcBlob* shaderBlob = nullptr;
-hr = shaderResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shaderBlob), nullptr);
-assert(SUCCEEDED(hr));
-// 成功したログを出す
-Log(ConvertString(std::format(L"Compile Succeeded, path:{}, profile:{}\n", filePath, profile)));
-// もう使わないリソースを解放
-shaderSource->Release();
-shaderResult->Release();
-// 実行用のバイナリを返却
-return shaderBlob;
+	IDxcBlob* shaderBlob = nullptr;
+	hr = shaderResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shaderBlob), nullptr);
+	assert(SUCCEEDED(hr));
+	// 成功したログを出す
+	Log(ConvertString(std::format(L"Compile Succeeded, path:{}, profile:{}\n", filePath, profile)));
+	// もう使わないリソースを解放
+	shaderSource->Release();
+	shaderResult->Release();
+	// 実行用のバイナリを返却
+	return shaderBlob;
 }
 
 // Windowsアプリでのエントリーポイント(main関数)
@@ -344,10 +344,30 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	struct Vector4 {
 		float x, y, z, w;
 	};
-	// 1. RootSignature（ルートシグネチャ）の生成
-	ID3D12RootSignature* rootSignature = nullptr;
+
+	struct Material {
+		Vector4 color;
+	};
+
+
+	// --- 370行目付近から書き換え ---
+
+// 1. RootSignature（ルートシグネチャ）の生成
+	ID3D12RootSignature* rootSignature = nullptr; // 変数の宣言（1回だけ！）
+
+	D3D12_ROOT_PARAMETER rootParameters[1]{}; // 配列の宣言（1回だけ！）
+	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	rootParameters[0].Descriptor.ShaderRegister = 0;
+	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
 	D3D12_ROOT_SIGNATURE_DESC descriptionRootSignature{};
-	descriptionRootSignature.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+	descriptionRootSignature.pParameters = rootParameters;
+	descriptionRootSignature.NumParameters = _countof(rootParameters);
+
+	descriptionRootSignature.Flags =
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+	//RootParameter生成。複数設定できるので配列。今回結果1つだけなので長さ1の配列
+
 
 	ID3DBlob* signatureBlob = nullptr;
 	ID3DBlob* errorBlob = nullptr;
@@ -445,6 +465,42 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	vertexData[1] = { 0.0f, 0.5f, 0.0f, 1.0f };
 	// 右下
 	vertexData[2] = { 0.5f, -0.5f, 0.0f, 1.0f };
+
+	// Material用のResourceを作る
+	ID3D12Resource* materialResource = nullptr;
+
+	D3D12_RESOURCE_DESC materialResourceDesc{};
+	materialResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	materialResourceDesc.Width = sizeof(Material);
+	materialResourceDesc.Height = 1;
+	materialResourceDesc.DepthOrArraySize = 1;
+	materialResourceDesc.MipLevels = 1;
+	materialResourceDesc.SampleDesc.Count = 1;
+	materialResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	hr = device->CreateCommittedResource(
+		&uploadHeapProperties,
+		D3D12_HEAP_FLAG_NONE,
+		&materialResourceDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&materialResource)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// Materialデータを書き込む
+	Material* materialData = nullptr;
+
+	materialResource->Map(
+		0,
+		nullptr,
+		reinterpret_cast<void**>(&materialData)
+	);
+
+	// 赤色
+	materialData->color = { 1.0f,0.0f,0.0f,1.0f };
+
 	// ビューポート
 	D3D12_VIEWPORT viewport{};
 	// クライアント領域のサイズと一緒にして画面全体に表示
@@ -463,7 +519,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	scissorRect.top = 0;
 	scissorRect.bottom = kClientHeight;
 	// --- ここまで ---
-	// 
+	// 
 	// ログ設定
 	std::filesystem::create_directory("logs");
 	std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
@@ -500,6 +556,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// RootSignatureを設定。PSOに設定しているけど別途設定が必要
 			commandList->SetGraphicsRootSignature(rootSignature);
 			commandList->SetPipelineState(graphicsPipelineState); // PSOを設定
+			// MaterialのCBVを設定
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView); // VBVを設定
 			// 形状を設定。PSOに設定しているものとはまた別。同じものを設定すると考えておけば良い
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -559,6 +620,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	rootSignature->Release();
 	pixelShaderBlob->Release();
 	vertexShaderBlob->Release();
+	materialResource->Release();
 
 #ifdef _DEBUG
 	debugController->Release();
