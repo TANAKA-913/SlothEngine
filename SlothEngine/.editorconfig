@@ -12,3 +12,5 @@ spelling_use_default_exclusion_dictionary = true
 spelling_exclusion_path = ./exclusion.dic
 [*.{cpp,h,hlsl,hlsli}]
 charset = uft-8
+[externals/++]
+generated_code =true

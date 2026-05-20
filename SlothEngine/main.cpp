@@ -11,6 +11,14 @@
 
 #include "Math.h"
 #include "Matrix4x4.h"
+
+#ifdef USE_IMGUI
+#include "externals/imgui/imgui.h"
+#include "externals/imgui/imgui_impl_dx12.h"
+#include "externals/imgui/imgui_impl_win32.h"
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#endif
+
 #include <cassert>
 #include <d3d12.h>
 #include <dbghelp.h>
@@ -27,6 +35,13 @@
 
 // ウィンドウプロージャ
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+#ifdef USE_IMGUI
+	// ImGuiのメッセージハンドラを呼び出す
+	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) {
+		return true;
+	}
+#endif
+
 	// メッセージに応じてゲーム固有の処理を行う
 	switch (msg) {
 		// ウィンドウが破棄された
@@ -96,6 +111,7 @@ static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
 	// 他に関連づけられているSEH例外ハンドラがあれば実行。通常はプロセスを終了する
 	return EXCEPTION_EXECUTE_HANDLER;
 }
+
 IDxcBlob* CompileShader(
     // CompilerするShaderファイルへのパス
     const std::wstring& filePath,
@@ -123,7 +139,7 @@ IDxcBlob* CompileShader(
 	    profile, // ShaderProfileの設定
 	    L"-Zi",
 	    L"-Qembed_debug", // デバッグ用の情報を埋め込む
-	    L"-Od",           // 最適化を外しておく
+	    L"-Od",           // 最最適化を外しておく
 	    L"-Zpr",          // メモリレイアウトは行優先
 	};
 	// 実際にshaderをコンパイルする
@@ -326,6 +342,17 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	rtvHandles[1].ptr = rtvHandles[0].ptr + device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	device->CreateRenderTargetView(swapChainResources[1], &rtvDesc, rtvHandles[1]);
 
+#ifdef USE_IMGUI
+	// 【スライド5枚目】ImGui用のSRVディスクリプタヒープを作成する
+	ID3D12DescriptorHeap* srvDescriptorHeap = nullptr;
+	D3D12_DESCRIPTOR_HEAP_DESC srvDescriptorHeapDesc{};
+	srvDescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	srvDescriptorHeapDesc.NumDescriptors = 1;
+	srvDescriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE; // シェーダーから見えるようにする
+	hr = device->CreateDescriptorHeap(&srvDescriptorHeapDesc, IID_PPV_ARGS(&srvDescriptorHeap));
+	assert(SUCCEEDED(hr));
+#endif
+
 	ID3D12Fence* fence = nullptr;
 	uint64_t fenceValue = 0;
 	hr = device->CreateFence(fenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
@@ -349,6 +376,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 
 	Log("Complete create DirectX12 Objects!!!\n");
+
+#ifdef USE_IMGUI
+	// 【スライド6枚目】ImGuiの初期化処理
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGui::StyleColorsDark();
+	ImGui_ImplWin32_Init(hwnd);
+	ImGui_ImplDX12_Init(
+	    device,
+	    2, // スワップチェーンのバッファ数
+	    DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, srvDescriptorHeap, srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+#endif
 
 	// --- 構造体の定義群 ---
 	struct Vector4 {
@@ -526,7 +565,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
         Vector3{0.0f, 0.0f, 0.0f}
     };
 
-	// 【スライド4枚目】カメラ用のTransform変数を初期化
+	// カメラ用のTransform変数を初期化
 	Transform cameraTransform{
 	    Vector3{1.0f, 1.0f, 1.0f },
         Vector3{0.0f, 0.0f, 0.0f },
@@ -539,7 +578,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		} else {
-			// === 【スライド4枚目】ゲームの処理（WVP行列を計算してCBufferに適用） ===
+#ifdef USE_IMGUI
+			// 【スライド7枚目】ImGuiにフレームの開始を伝える
+			ImGui_ImplDX12_NewFrame();
+			ImGui_ImplWin32_NewFrame();
+			ImGui::NewFrame();
+
+			// 🔧 デバッグ用の情報（今回は動作確認用にImGuiのデモウィンドウを表示してみます）
+			// 表示したくない場合はコメントアウトか削除してOKです
+			ImGui::ShowDemoWindow();
+#endif
 
 			// 1. オブジェクトの回転とワールド行列作成
 			transform.rotate.y += 0.03f;
@@ -559,7 +607,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// 5. CBufferに転送して更新
 			*wvpData = worldViewProjectionMatrix;
 
-			// --- フレーム開始処理 ---
+#ifdef USE_IMGUI
+			// 【スライド7枚目】ImGuiの内部的な描画データを生成する
+			ImGui::Render();
+#endif
+
+			// --- 描画開始処理 ---
 			UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
 
 			// バリア設定：Present -> RenderTarget
@@ -591,8 +644,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-			// 描画！（DrawCall）
+			// 三角形の描画！（DrawCall）
 			commandList->DrawInstanced(3, 1, 0, 0);
+
+#ifdef USE_IMGUI
+			// ----------------- 【重要】ImGuiの描画コマンドを積む -----------------
+			// 【スライド8枚目】描画用のDescriptorHeapをコマンドリストにセットする
+			ID3D12DescriptorHeap* descriptorHeaps[] = {srvDescriptorHeap};
+			commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
+			// 【スライド9枚目】ImGuiの描画コマンドを実行
+			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+			// ------------------------------------------------------------------
+#endif
 
 			// --- 描画終了処理 ---
 			// バリア設定：RenderTarget -> Present
@@ -637,6 +701,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		WaitForSingleObject(fenceEvent, INFINITE);
 	}
 
+#ifdef USE_IMGUI
+	// 【スライド10枚目】ImGuiの解放処理
+	ImGui_ImplDX12_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
+#endif
+
 	// ===== リソースの解放 =====
 	materialResource->Release();
 	wvpResource->Release();
@@ -660,6 +731,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	includeHandler->Release();
 	dxcCompiler->Release();
 	dxcUtils->Release();
+
+#ifdef USE_IMGUI
+	// ImGui用SRVディスクリプタヒープの解放
+	srvDescriptorHeap->Release();
+#endif
 
 	// SwapChain関連
 	swapChainResources[0]->Release();
