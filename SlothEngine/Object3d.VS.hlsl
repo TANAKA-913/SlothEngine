@@ -1,3 +1,4 @@
+#include"object3d.hlsli"
 cbuffer gTransformationMatrix : register(b1)
 {
     matrix gWorldMatrix;
@@ -6,18 +7,15 @@ cbuffer gTransformationMatrix : register(b1)
 struct VecterShaderInput
 {
     float4 position : POSITION;
+    float2 texcoord : TEXCOORD0;
 };
 
-struct VecterShaderOutput
+VertexShaderOutput main(VecterShaderInput input)
 {
-    float4 position : SV_POSITION;
-};
-
-VecterShaderOutput main(VecterShaderInput input)
-{
-    VecterShaderOutput output;
+    VertexShaderOutput output;
    
     output.position = mul(input.position, gWorldMatrix);
+    output.texcoord = input.texcoord;
     
     return output;
 }
