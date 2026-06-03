@@ -4,13 +4,13 @@ cbuffer gTransformationMatrix : register(b1)
     matrix gWorldMatrix;
 };
 
-struct VecterShaderInput
+struct VertexShaderInput
 {
     float4 position : POSITION;
     float2 texcoord : TEXCOORD0;
 };
 
-VertexShaderOutput main(VecterShaderInput input)
+VertexShaderOutput main(VertexShaderInput input)
 {
     VertexShaderOutput output;
    
