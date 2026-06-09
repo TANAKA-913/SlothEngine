@@ -926,7 +926,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	ImGui::DestroyContext();
 #endif
 
-	// マテリアル1と2の解放
+
 	if (materialResource1)
 		materialResource1->Release();
 	if (materialResource2)
