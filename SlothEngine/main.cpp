@@ -597,37 +597,71 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
 	*wvpData = Math::MakeIdentity4x4();
 
-	// 頂点リソースを作る
-	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(Vertexdata) * 6);
+	// 頂点数
+	const uint32_t kSubdivision = 16;
+	const uint32_t kVertexCount = kSubdivision * kSubdivision * 6;
 
+	// 頂点リソース作成
+	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(Vertexdata) * kVertexCount);
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
 	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
-	vertexBufferView.SizeInBytes = sizeof(Vertexdata) * 6;
+	vertexBufferView.SizeInBytes = sizeof(Vertexdata) * kVertexCount;
 	vertexBufferView.StrideInBytes = sizeof(Vertexdata);
 
 	// 頂点リソースにデータを書き込む
 	Vertexdata* vertexData = nullptr;
 	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
 
-	// 左下
-	vertexData[0].position = {-0.5f, -0.5f, 0.0f, 1.0f};
-	vertexData[0].texcoord = {0.0f, 1.0f};
-	// 上
-	vertexData[1].position = {0.0f, 0.5f, 0.0f, 1.0f};
-	vertexData[1].texcoord = {0.5f, 0.0f};
-	// 右下
-	vertexData[2].position = {0.5f, -0.5f, 0.0f, 1.0f};
-	vertexData[2].texcoord = {1.0f, 1.0f};
-	// 左下2
-	vertexData[3].position = {-0.5f, -0.5f, 0.5f, 1.0f};
-	vertexData[3].texcoord = {0.0f, 1.0f};
-	// 上2
-	vertexData[4].position = {0.0f, 0.5f, 0.0f, 1.0f};
-	vertexData[4].texcoord = {0.5f, 0.0f};
-	// 右下2
-	vertexData[5].position = {0.5f, -0.5f, -0.5f, 1.0f};
-	vertexData[5].texcoord = {1.0f, 1.0f};
+	const float pi = 3.1415926535f;
 
+	const float kLonEvery = 2.0f * pi / static_cast<float>(kSubdivision);
+
+	const float kLatEvery = pi / static_cast<float>(kSubdivision);
+	for (uint32_t latIndex = 0; latIndex < kSubdivision; ++latIndex) {
+		float lat = -pi / 2.0f + kLatEvery * static_cast<float>(latIndex);
+
+		float latNext = lat + kLatEvery;
+
+		for (uint32_t lonIndex = 0; lonIndex < kSubdivision; ++lonIndex) {
+			uint32_t startIndex = (latIndex * kSubdivision + lonIndex) * 6;
+			Vector3 a{cosf(lat) * cosf(lonIndex * kLonEvery), sinf(lat), cosf(lat) * sinf(lonIndex * kLonEvery)};
+
+			Vector3 b{cosf(latNext) * cosf(lonIndex * kLonEvery), sinf(latNext), cosf(latNext) * sinf(lonIndex * kLonEvery)};
+
+			Vector3 c{cosf(lat) * cosf((lonIndex + 1) * kLonEvery), sinf(lat), cosf(lat) * sinf((lonIndex + 1) * kLonEvery)};
+
+			Vector3 d{cosf(latNext) * cosf((lonIndex + 1) * kLonEvery), sinf(latNext), cosf(latNext) * sinf((lonIndex + 1) * kLonEvery)};
+			float u0 = static_cast<float>(lonIndex) / static_cast<float>(kSubdivision);
+
+			float u1 = static_cast<float>(lonIndex + 1) / static_cast<float>(kSubdivision);
+
+			float v0 = 1.0f - static_cast<float>(latIndex) / static_cast<float>(kSubdivision);
+
+			float v1 = 1.0f - static_cast<float>(latIndex + 1) / static_cast<float>(kSubdivision);
+			vertexData[startIndex + 0].position = {a.x, a.y, a.z, 1.0f};
+
+			vertexData[startIndex + 1].position = {b.x, b.y, b.z, 1.0f};
+
+			vertexData[startIndex + 2].position = {c.x, c.y, c.z, 1.0f};
+
+			vertexData[startIndex + 3].position = {c.x, c.y, c.z, 1.0f};
+
+			vertexData[startIndex + 4].position = {b.x, b.y, b.z, 1.0f};
+
+			vertexData[startIndex + 5].position = {d.x, d.y, d.z, 1.0f};
+			vertexData[startIndex + 0].texcoord = {u0, v0};
+
+			vertexData[startIndex + 1].texcoord = {u0, v1};
+
+			vertexData[startIndex + 2].texcoord = {u1, v0};
+
+			vertexData[startIndex + 3].texcoord = {u1, v0};
+
+			vertexData[startIndex + 4].texcoord = {u0, v1};
+
+			vertexData[startIndex + 5].texcoord = {u1, v1};
+		}
+	}
 	// Material用のResourceを作る
 	ID3D12Resource* materialResource = nullptr;
 	D3D12_RESOURCE_DESC materialResourceDesc{};
@@ -649,9 +683,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
 	materialData->color = {1.0f, 1.0f, 1.0f, 1.0f}; 
 
-	// =================================================================
-	// 【改善】正しい位置に移動した Sprite 関連のデータ準備
-	// =================================================================
 	// Sprite用の頂点データを作る
 	ID3D12Resource* VertexResourcesprite = CreateBufferResource(device, sizeof(Vertexdata) * 6);
 
@@ -809,7 +840,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			commandList->DrawInstanced(6, 1, 0, 0);
+			commandList->DrawInstanced(kVertexCount, 1, 0, 0);
 
 			// -------------------------------------------------------------
 			// 【改善】② Spriteの描画処理をここに追加
