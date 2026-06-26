@@ -34,10 +34,11 @@ PixelShaderOutput main(VertexShaderOutput input)
 
     if (gMaterial.enableLighting != 0)
     {
-        // 【追加】ランバート反射モデルでライティング計算
-        // 入力法線を再正規化（補間で長さが変わるため）
-        // saturateで内積の負値を0にクランプ（裏面には光が当たらない）
-        float cos = saturate(dot(normalize(input.normal), -gDirectionalLight.direction));
+        // 【変更】Half Lambert反射モデルでライティング計算
+        // NdotL: 法線とライト方向（ライト側への向き）の内積 [-1, 1]
+        float NdotL = dot(normalize(input.normal), -gDirectionalLight.direction);
+        // [-1,1] を [0,1] へなだらかに変形し、さらに2乗でよりそれっぽく見せる
+        float cos = pow(NdotL * 0.5f + 0.5f, 2.0f);
 
         output.color = gMaterial.color * textureColor
                      * gDirectionalLight.color
