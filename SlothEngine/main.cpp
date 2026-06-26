@@ -728,6 +728,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	Transform transformSprite{{1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
 
+	ID3D12Resource* indexresourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
+	D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
+	//リソースの先頭アドレスから使う
+	indexBufferViewSprite.BufferLocation = indexresourceSprite->GetGPUVirtualAddress();
+	// インデックスバッファのサイズは6個分
+	indexBufferViewSprite.SizeInBytes = sizeof(uint32_t) * 6;
+	// インデックスバッファの形式は32bit符号なし整数
+	indexBufferViewSprite.Format = DXGI_FORMAT_R32_UINT;
+
+	// インデックスバッファの内容を設定
+	uint32_t* indexDataSprite = nullptr;
+	indexResou
 	// =========================================================================
 	// 【追加】平行光源リソース
 	// =========================================================================
@@ -865,7 +877,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->SetGraphicsRootConstantBufferView(1, transformationResourceSprite->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
-			commandList->DrawInstanced(6, 1, 0, 0);
+			commandList->IASetIndexBuffer(&indexBufferViewSprite);
+			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 #ifdef USE_IMGUI
 			commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
