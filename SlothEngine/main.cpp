@@ -698,24 +698,24 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// =========================================================================
 	// Sprite頂点データ
 	// =========================================================================
-	ID3D12Resource* VertexResourcesprite = CreateBufferResource(device, sizeof(VertexData) * 6);
+	// 【変更】Indexを利用するので、重複を除いた4頂点だけ用意する
+	ID3D12Resource* VertexResourcesprite = CreateBufferResource(device, sizeof(VertexData) * 4);
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSprite{};
 	vertexBufferViewSprite.BufferLocation = VertexResourcesprite->GetGPUVirtualAddress();
-	vertexBufferViewSprite.SizeInBytes    = sizeof(VertexData) * 6;
+	vertexBufferViewSprite.SizeInBytes    = sizeof(VertexData) * 4;
 	vertexBufferViewSprite.StrideInBytes  = sizeof(VertexData);
 
 	VertexData* vertexDataSprite = nullptr;
 	VertexResourcesprite->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataSprite));
 
+	// 4頂点のみ定義（左下・左上・右下・右上）
 	vertexDataSprite[0].position = {0.0f,   360.0f, 0.0f, 1.0f}; vertexDataSprite[0].texcoord = {0.0f, 1.0f};
 	vertexDataSprite[1].position = {0.0f,   0.0f,   0.0f, 1.0f}; vertexDataSprite[1].texcoord = {0.0f, 0.0f};
 	vertexDataSprite[2].position = {640.0f, 360.0f, 0.0f, 1.0f}; vertexDataSprite[2].texcoord = {1.0f, 1.0f};
-	vertexDataSprite[3].position = {0.0f,   0.0f,   0.0f, 1.0f}; vertexDataSprite[3].texcoord = {0.0f, 0.0f};
-	vertexDataSprite[4].position = {640.0f, 0.0f,   0.0f, 1.0f}; vertexDataSprite[4].texcoord = {1.0f, 0.0f};
-	vertexDataSprite[5].position = {640.0f, 360.0f, 0.0f, 1.0f}; vertexDataSprite[5].texcoord = {1.0f, 1.0f};
+	vertexDataSprite[3].position = {640.0f, 0.0f,   0.0f, 1.0f}; vertexDataSprite[3].texcoord = {1.0f, 0.0f};
 
 	// 【追加】Spriteの法線は使わないが-z方向で設定
-	for (int i = 0; i < 6; i++) {
+	for (int i = 0; i < 4; i++) {
 		vertexDataSprite[i].normal = {0.0f, 0.0f, -1.0f};
 	}
 
@@ -739,7 +739,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// インデックスバッファの内容を設定
 	uint32_t* indexDataSprite = nullptr;
-	indexResou
+	indexresourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&indexDataSprite));
+	indexDataSprite[0] = 0; indexDataSprite[1] = 1; indexDataSprite[2] = 2;
+	indexDataSprite[3] = 1; indexDataSprite[4] = 3; indexDataSprite[5] = 2;
 	// =========================================================================
 	// 【追加】平行光源リソース
 	// =========================================================================
@@ -932,6 +934,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	if (vertexResource)             vertexResource->Release();
 	if (VertexResourcesprite)       VertexResourcesprite->Release();
 	if (transformationResourceSprite) transformationResourceSprite->Release();
+	if (indexresourceSprite)        indexresourceSprite->Release();
 	if (textureresource)            textureresource->Release();
 	if (textureResource2)           textureResource2->Release();
 	if (graphicsPipelineState)      graphicsPipelineState->Release();
