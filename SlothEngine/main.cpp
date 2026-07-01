@@ -44,10 +44,12 @@ struct Transform {
 	Vector3 translate;
 };
 
-// 【変更】enableLightingを追加
+// 【変更】enableLightingを追加、【追加】uvTransform用にpadding+行列を追加
 struct Material {
-	Vector4  color;
-	int32_t  enableLighting;
+	Vector4   color;
+	int32_t   enableLighting;
+	float     padding[3];
+	Matrix4x4 uvTransform;
 };
 
 // 【変更】法線フィールドを追加
@@ -685,6 +687,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
 	materialData->color          = {1.0f, 1.0f, 1.0f, 1.0f};
 	materialData->enableLighting = true; // 【追加】ライティング有効
+	materialData->uvTransform    = Math::MakeIdentity4x4(); // 【追加】UVTransform初期化
 
 	// =========================================================================
 	// 【追加】Sprite用マテリアル（ライティングOFF）
@@ -694,6 +697,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	materialResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&materialDataSprite));
 	materialDataSprite->color          = {1.0f, 1.0f, 1.0f, 1.0f};
 	materialDataSprite->enableLighting = false; // SpriteにはLightingしない
+	materialDataSprite->uvTransform    = Math::MakeIdentity4x4(); // 【追加】UVTransform初期化
 
 	// =========================================================================
 	// Sprite頂点データ
@@ -727,6 +731,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	transformationDataSprite->World = Math::MakeIdentity4x4();
 
 	Transform transformSprite{{1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+
+	// 【追加】Sprite用UVTransform変数
+	Transform uvTransformSprite{
+		{1.0f, 1.0f, 1.0f},
+		{0.0f, 0.0f, 0.0f},
+		{0.0f, 0.0f, 0.0f},
+	};
 
 	ID3D12Resource* indexresourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
 	D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
@@ -804,6 +815,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			ImGui::SliderFloat3("direction", &directionalLightData->direction.x, -1.0f, 1.0f);
 			ImGui::SliderFloat("intensity", &directionalLightData->intensity, 0.0f, 1.0f);
 			ImGui::End();
+
+			// 【追加】Sprite用UVTransformの編集
+			ImGui::Begin("UVTransform");
+			ImGui::DragFloat2("UVTranslate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
+			ImGui::DragFloat2("UVScale", &uvTransformSprite.scale.x, 0.01f, -10.0f, 10.0f);
+			ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
+			ImGui::End();
 #endif
 
 			// Update
@@ -830,6 +848,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			Matrix4x4 wvpMatrixSprite        = Math::Multiply(worldMatrixSprite, Math::Multiply(viewMatrixSprite, projectionMatrixSprite));
 			transformationDataSprite->WVP    = wvpMatrixSprite;
 			transformationDataSprite->World  = worldMatrixSprite;
+
+			// 【追加】Sprite用UVTransform行列の生成（SRTの順で合成）
+			Matrix4x4 uvTransformMatrix = Math::MakeScaleMatrix(uvTransformSprite.scale);
+			uvTransformMatrix           = Math::Multiply(uvTransformMatrix, Math::MakeRotateZMatrix(uvTransformSprite.rotate.z));
+			uvTransformMatrix           = Math::Multiply(uvTransformMatrix, Math::MakeTranslateMatrix(uvTransformSprite.translate));
+			materialDataSprite->uvTransform = uvTransformMatrix;
 
 #ifdef USE_IMGUI
 			ImGui::Render();

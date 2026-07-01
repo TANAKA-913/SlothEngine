@@ -3,8 +3,8 @@
 // 【変更】WVPとWorldの両方を持つ構造体に変更
 cbuffer gTransformationMatrix : register(b1)
 {
-    float32_t4x4 WVP;
-    float32_t4x4 World;
+    float4x4 WVP;
+    float4x4 World;
 };
 
 struct VertexShaderInput
@@ -24,7 +24,7 @@ VertexShaderOutput main(VertexShaderInput input)
 
     // 【追加】法線をワールド座標系に変換し正規化してPixelShaderへ渡す
     // WorldMatrixの左上3x3（拡縮・回転成分）だけを使う
-    output.normal = normalize(mul(input.normal, (float32_t3x3)World));
+    output.normal = normalize(mul(input.normal, (float3x3)World));
 
     return output;
 }

@@ -2,8 +2,10 @@
 
 struct Material
 {
-    float4  color;
-    int32_t enableLighting;
+    float4   color;
+    int      enableLighting;
+    float    padding[3];
+    float4x4 uvTransform;
 };
 
 // 【追加】平行光源の構造体
@@ -30,7 +32,9 @@ PixelShaderOutput main(VertexShaderOutput input)
 {
     PixelShaderOutput output;
 
-    float4 textureColor = gTexture.Sample(gSampler, input.texcoord);
+    // 【追加】UVTransformを適用してからサンプリングする
+    float4 transformedUV = mul(float4(input.texcoord, 0.0f, 1.0f), gMaterial.uvTransform);
+    float4 textureColor  = gTexture.Sample(gSampler, transformedUV.xy);
 
     if (gMaterial.enableLighting != 0)
     {
