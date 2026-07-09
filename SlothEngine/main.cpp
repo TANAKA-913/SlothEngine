@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <wrl.h>
 #include <cstdint>
 #include <format>
 #include <string>
@@ -34,6 +35,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "dxcompiler.lib")
+
+using Microsoft::WRL::ComPtr; // 【追加】ComPtrを使いやすくする
 
 const int32_t kClientWidth  = 1280;
 const int32_t kClientHeight = 720;
@@ -292,12 +295,12 @@ std::vector<VertexData> CreateSphereVertexData(uint32_t kSubdivision)
 	return vertices;
 }
 
-IDxcBlob* CompileShader(
+ComPtr<IDxcBlob> CompileShader(
     const std::wstring& filePath, const wchar_t* profile,
-    IDxcUtils* dxcUtils, IDxcCompiler3* dxcCompiler, IDxcIncludeHandler* includeHandler)
+    const ComPtr<IDxcUtils>& dxcUtils, const ComPtr<IDxcCompiler3>& dxcCompiler, const ComPtr<IDxcIncludeHandler>& includeHandler)
 {
 	Log(ConvertString(std::format(L"Begin CompileShader, path:{}, profile:{}\n", filePath, profile)));
-	IDxcBlobEncoding* shaderSource = nullptr;
+	ComPtr<IDxcBlobEncoding> shaderSource;
 	HRESULT hr = dxcUtils->LoadFile(filePath.c_str(), nullptr, &shaderSource);
 	assert(SUCCEEDED(hr));
 
@@ -313,27 +316,25 @@ IDxcBlob* CompileShader(
 	    L"-Od",
 	    L"-Zpr",
 	};
-	IDxcResult* shaderResult = nullptr;
+	ComPtr<IDxcResult> shaderResult;
 	hr = dxcCompiler->Compile(&shaderSourceBuffer, arguments, _countof(arguments),
-	                           includeHandler, IID_PPV_ARGS(&shaderResult));
+	                           includeHandler.Get(), IID_PPV_ARGS(&shaderResult));
 	assert(SUCCEEDED(hr));
 
-	IDxcBlobUtf8* shaderError = nullptr;
+	ComPtr<IDxcBlobUtf8> shaderError;
 	shaderResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&shaderError), nullptr);
 	if (shaderError != nullptr && shaderError->GetStringLength() != 0) {
 		Log(shaderError->GetStringPointer());
 		assert(false);
 	}
-	IDxcBlob* shaderBlob = nullptr;
+	ComPtr<IDxcBlob> shaderBlob;
 	hr = shaderResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shaderBlob), nullptr);
 	assert(SUCCEEDED(hr));
 	Log(ConvertString(std::format(L"Compile Succeeded, path:{}, profile:{}\n", filePath, profile)));
-	shaderSource->Release();
-	shaderResult->Release();
-	return shaderBlob;
+	return shaderBlob; // 【変更】ComPtrなのでReleaseは不要
 }
 
-ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes) {
+ComPtr<ID3D12Resource> CreateBufferResource(const ComPtr<ID3D12Device>& device, size_t sizeInBytes) {
 	D3D12_HEAP_PROPERTIES uploadHeapProperties{};
 	uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
 
@@ -346,7 +347,7 @@ ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes) {
 	resourceDesc.SampleDesc.Count   = 1;
 	resourceDesc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-	ID3D12Resource* resource = nullptr;
+	ComPtr<ID3D12Resource> resource;
 	HRESULT hr = device->CreateCommittedResource(
 	    &uploadHeapProperties, D3D12_HEAP_FLAG_NONE,
 	    &resourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
@@ -367,7 +368,7 @@ DirectX::ScratchImage LoadTexture(const std::string& filePath) {
 	return mipImage;
 }
 
-ID3D12Resource* CreateTextureResource(ID3D12Device* device, const DirectX::TexMetadata& metadata) {
+ComPtr<ID3D12Resource> CreateTextureResource(const ComPtr<ID3D12Device>& device, const DirectX::TexMetadata& metadata) {
 	D3D12_RESOURCE_DESC resourceDesc{};
 	resourceDesc.Width            = UINT(metadata.width);
 	resourceDesc.Height           = UINT(metadata.height);
@@ -382,7 +383,7 @@ ID3D12Resource* CreateTextureResource(ID3D12Device* device, const DirectX::TexMe
 	heapProperties.CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_WRITE_BACK;
 	heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_L0;
 
-	ID3D12Resource* resource = nullptr;
+	ComPtr<ID3D12Resource> resource;
 	HRESULT hr = device->CreateCommittedResource(
 	    &heapProperties, D3D12_HEAP_FLAG_NONE,
 	    &resourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
@@ -391,7 +392,7 @@ ID3D12Resource* CreateTextureResource(ID3D12Device* device, const DirectX::TexMe
 	return resource;
 }
 
-void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mipimage) {
+void UploadTextureData(const ComPtr<ID3D12Resource>& texture, const DirectX::ScratchImage& mipimage) {
 	const DirectX::TexMetadata& metadata = mipimage.GetMetadata();
 	for (size_t mipLevel = 0; mipLevel < metadata.mipLevels; ++mipLevel) {
 		const DirectX::Image* ima = mipimage.GetImage(mipLevel, 0, 0);
@@ -402,7 +403,7 @@ void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mip
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE GetCPUDescriptorHandle(
-    ID3D12DescriptorHeap* descriptorHeap, uint32_t descriptorSize, uint32_t index)
+    const ComPtr<ID3D12DescriptorHeap>& descriptorHeap, uint32_t descriptorSize, uint32_t index)
 {
 	D3D12_CPU_DESCRIPTOR_HANDLE handleCPU = descriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	handleCPU.ptr += (descriptorSize * index);
@@ -410,14 +411,14 @@ D3D12_CPU_DESCRIPTOR_HANDLE GetCPUDescriptorHandle(
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE GetGPUDescriptorHandle(
-    ID3D12DescriptorHeap* descriptorHeap, uint32_t descriptorSize, uint32_t index)
+    const ComPtr<ID3D12DescriptorHeap>& descriptorHeap, uint32_t descriptorSize, uint32_t index)
 {
 	D3D12_GPU_DESCRIPTOR_HANDLE handleGPU = descriptorHeap->GetGPUDescriptorHandleForHeapStart();
 	handleGPU.ptr += (descriptorSize * index);
 	return handleGPU;
 }
 
-ID3D12Resource* CreateDepthStencilTextureResource(ID3D12Device* device, int32_t width, int32_t height) {
+ComPtr<ID3D12Resource> CreateDepthStencilTextureResource(const ComPtr<ID3D12Device>& device, int32_t width, int32_t height) {
 	D3D12_RESOURCE_DESC resourceDesc{};
 	resourceDesc.Width              = width;
 	resourceDesc.Height             = height;
@@ -434,7 +435,7 @@ ID3D12Resource* CreateDepthStencilTextureResource(ID3D12Device* device, int32_t 
 	depthClearValue.DepthStencil.Depth = 1.0f;
 	depthClearValue.Format             = DXGI_FORMAT_D24_UNORM_S8_UINT;
 
-	ID3D12Resource* resource = nullptr;
+	ComPtr<ID3D12Resource> resource;
 	HRESULT hr = device->CreateCommittedResource(
 	    &heapProperties, D3D12_HEAP_FLAG_NONE,
 	    &resourceDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE,
@@ -444,26 +445,47 @@ ID3D12Resource* CreateDepthStencilTextureResource(ID3D12Device* device, int32_t 
 }
 
 // =============================================================================
+// 【追加】リソースリークチェッカー
+// Destructorはコンストラクタと逆順で呼ばれる性質を利用し、
+// WinMain内で最初に宣言することで、他の全てのComPtrが解放された後に
+// チェックが行われるようにする
+// =============================================================================
+struct D3DResourceLeakChecker {
+	~D3DResourceLeakChecker() {
+		// リソースリークチェック
+		Microsoft::WRL::ComPtr<IDXGIDebug1> debug;
+		if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug)))) {
+			debug->ReportLiveObjects(DXGI_DEBUG_ALL,   DXGI_DEBUG_RLO_ALL);
+			debug->ReportLiveObjects(DXGI_DEBUG_APP,   DXGI_DEBUG_RLO_ALL);
+			debug->ReportLiveObjects(DXGI_DEBUG_D3D12, DXGI_DEBUG_RLO_ALL);
+		}
+	}
+};
+
+// =============================================================================
 // WinMain
 // =============================================================================
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
+	D3DResourceLeakChecker leakCheck; // 【追加】一番最初に宣言することで、Destructorが一番最後に呼ばれるようにする
 
 	CoInitializeEx(0, COINIT_MULTITHREADED);
 	SetUnhandledExceptionFilter(ExportDump);
 
+	{ // 【追加】このブロックを抜けるときに全てのComPtrが解放されるようにする（CoUninitializeより前に解放するため）
+
 #ifdef USE_IMGUI
-	ID3D12Debug1* debugController = nullptr;
+	ComPtr<ID3D12Debug1> debugController;
 	if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
 		debugController->EnableDebugLayer();
 		debugController->SetEnableGPUBasedValidation(TRUE);
 	}
 #endif
 
-	IDXGIFactory7* dxgiFactory = nullptr;
+	ComPtr<IDXGIFactory7> dxgiFactory;
 	HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
 	assert(SUCCEEDED(hr));
 
-	IDXGIAdapter1* useAdapter = nullptr;
+	ComPtr<IDXGIAdapter1> useAdapter;
 	for (UINT i = 0;
 	     dxgiFactory->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
 	                                              IID_PPV_ARGS(&useAdapter)) == S_OK; i++)
@@ -479,18 +501,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	}
 	assert(useAdapter != nullptr);
 
-	ID3D12Device* device = nullptr;
+	ComPtr<ID3D12Device> device;
 	D3D_FEATURE_LEVEL featureLevels[]    = {D3D_FEATURE_LEVEL_12_2, D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_12_0};
 	const char*        featureLevelString[] = {"12.2", "12.1", "12.0"};
 	for (size_t i = 0; i < _countof(featureLevels); ++i) {
-		hr = D3D12CreateDevice(useAdapter, featureLevels[i], IID_PPV_ARGS(&device));
+		hr = D3D12CreateDevice(useAdapter.Get(), featureLevels[i], IID_PPV_ARGS(&device));
 		if (SUCCEEDED(hr)) { Log(std::format("FeatureLevel : {}\n", featureLevelString[i])); break; }
 	}
 	assert(device != nullptr);
 	Log("Complete create D3D12Device!!!\n");
 
 #ifdef USE_IMGUI
-	ID3D12InfoQueue* infoQueue = nullptr;
+	ComPtr<ID3D12InfoQueue> infoQueue;
 	if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
 		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
 		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
@@ -503,7 +525,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		filter.DenyList.NumSeverities = _countof(severities);
 		filter.DenyList.pSeverityList = severities;
 		infoQueue->PushStorageFilter(&filter);
-		infoQueue->Release();
 	}
 #endif
 
@@ -523,21 +544,21 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	if (hwnd == nullptr) { return -1; }
 	ShowWindow(hwnd, SW_SHOW);
 
-	ID3D12CommandQueue* commandQueue = nullptr;
+	ComPtr<ID3D12CommandQueue> commandQueue;
 	D3D12_COMMAND_QUEUE_DESC commandQueueDesc{};
 	hr = device->CreateCommandQueue(&commandQueueDesc, IID_PPV_ARGS(&commandQueue));
 	assert(SUCCEEDED(hr));
 
-	ID3D12CommandAllocator* commandAllocator = nullptr;
+	ComPtr<ID3D12CommandAllocator> commandAllocator;
 	hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
 	assert(SUCCEEDED(hr));
 
-	ID3D12GraphicsCommandList* commandList = nullptr;
-	hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, nullptr,
+	ComPtr<ID3D12GraphicsCommandList> commandList;
+	hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr,
 	                                IID_PPV_ARGS(&commandList));
 	assert(SUCCEEDED(hr));
 
-	IDXGISwapChain4* swapChain = nullptr;
+	ComPtr<IDXGISwapChain4> swapChain;
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
 	swapChainDesc.Width       = kClientWidth;
 	swapChainDesc.Height      = kClientHeight;
@@ -546,18 +567,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.BufferCount = 2;
 	swapChainDesc.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue, hwnd, &swapChainDesc, nullptr, nullptr,
-	                                          reinterpret_cast<IDXGISwapChain1**>(&swapChain));
+	hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr,
+	                                          reinterpret_cast<IDXGISwapChain1**>(swapChain.GetAddressOf()));
 	assert(SUCCEEDED(hr));
 
-	ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
+	ComPtr<ID3D12DescriptorHeap> rtvDescriptorHeap;
 	D3D12_DESCRIPTOR_HEAP_DESC rtvDescriptorHeapDesc{};
 	rtvDescriptorHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 	rtvDescriptorHeapDesc.NumDescriptors = 2;
 	hr = device->CreateDescriptorHeap(&rtvDescriptorHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap));
 	assert(SUCCEEDED(hr));
 
-	ID3D12Resource* swapChainResources[2] = {nullptr};
+	ComPtr<ID3D12Resource> swapChainResources[2];
 	hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainResources[0])); assert(SUCCEEDED(hr));
 	hr = swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainResources[1])); assert(SUCCEEDED(hr));
 
@@ -568,11 +589,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvStartHandle = rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[2];
 	rtvHandles[0] = rtvStartHandle;
-	device->CreateRenderTargetView(swapChainResources[0], &rtvDesc, rtvHandles[0]);
+	device->CreateRenderTargetView(swapChainResources[0].Get(), &rtvDesc, rtvHandles[0]);
 	rtvHandles[1].ptr = rtvHandles[0].ptr + device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	device->CreateRenderTargetView(swapChainResources[1], &rtvDesc, rtvHandles[1]);
+	device->CreateRenderTargetView(swapChainResources[1].Get(), &rtvDesc, rtvHandles[1]);
 
-	ID3D12DescriptorHeap* srvDescriptorHeap = nullptr;
+	ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
 #ifdef USE_IMGUI
 	D3D12_DESCRIPTOR_HEAP_DESC srvDescriptorHeapDesc{};
 	srvDescriptorHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -582,16 +603,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 #endif
 
-	ID3D12Fence* fence = nullptr;
+	ComPtr<ID3D12Fence> fence;
 	uint64_t fenceValue = 0;
 	hr = device->CreateFence(fenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
 	assert(SUCCEEDED(hr));
 	HANDLE fenceEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	assert(fenceEvent != nullptr);
 
-	IDxcUtils*          dxcUtils    = nullptr;
-	IDxcCompiler3*      dxcCompiler = nullptr;
-	IDxcIncludeHandler* includeHandler = nullptr;
+	ComPtr<IDxcUtils>          dxcUtils;
+	ComPtr<IDxcCompiler3>      dxcCompiler;
+	ComPtr<IDxcIncludeHandler> includeHandler;
 	hr = DxcCreateInstance(CLSID_DxcUtils,     IID_PPV_ARGS(&dxcUtils));    assert(SUCCEEDED(hr));
 	hr = DxcCreateInstance(CLSID_DxcCompiler,  IID_PPV_ARGS(&dxcCompiler)); assert(SUCCEEDED(hr));
 	hr = dxcUtils->CreateDefaultIncludeHandler(&includeHandler);              assert(SUCCEEDED(hr));
@@ -611,18 +632,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// テクスチャ読み込み
 	DirectX::ScratchImage mipmapImage = LoadTexture("resources/uvChecker.png");
 	const DirectX::TexMetadata& metadata = mipmapImage.GetMetadata();
-	ID3D12Resource* textureresource = CreateTextureResource(device, metadata);
+	ComPtr<ID3D12Resource> textureresource = CreateTextureResource(device, metadata);
 	UploadTextureData(textureresource, mipmapImage);
 
 	// 【変更】モデルに貼るテクスチャはmtlファイルで指定されたものを使う
 	DirectX::ScratchImage mipImages2 = LoadTexture(modelData.material.textureFilePath);
 	const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
-	ID3D12Resource* textureResource2 = CreateTextureResource(device, metadata2);
+	ComPtr<ID3D12Resource> textureResource2 = CreateTextureResource(device, metadata2);
 	UploadTextureData(textureResource2, mipImages2);
 
-	ID3D12Resource* depthStencilResource = CreateDepthStencilTextureResource(device, kClientWidth, kClientHeight);
+	ComPtr<ID3D12Resource> depthStencilResource = CreateDepthStencilTextureResource(device, kClientWidth, kClientHeight);
 
-	ID3D12DescriptorHeap* dsvDescriptorHeap = nullptr;
+	ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap;
 	D3D12_DESCRIPTOR_HEAP_DESC dsvDescriptorHeapDesc{};
 	dsvDescriptorHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
 	dsvDescriptorHeapDesc.NumDescriptors = 1;
@@ -633,7 +654,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	dsvDesc.Format        = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	device->CreateDepthStencilView(depthStencilResource, &dsvDesc, dsvHandle);
+	device->CreateDepthStencilView(depthStencilResource.Get(), &dsvDesc, dsvHandle);
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 	srvDesc.Format                  = metadata.format;
@@ -642,7 +663,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	srvDesc.Texture2D.MipLevels     = UINT(metadata.mipLevels);
 	D3D12_CPU_DESCRIPTOR_HANDLE textureSrvHandleCPU = GetCPUDescriptorHandle(srvDescriptorHeap, desriptorSizeSRV, 1);
 	D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPU = GetGPUDescriptorHandle(srvDescriptorHeap, desriptorSizeSRV, 1);
-	device->CreateShaderResourceView(textureresource, &srvDesc, textureSrvHandleCPU);
+	device->CreateShaderResourceView(textureresource.Get(), &srvDesc, textureSrvHandleCPU);
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc2{};
 	srvDesc2.Format                  = metadata2.format;
@@ -651,15 +672,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	srvDesc2.Texture2D.MipLevels     = UINT(metadata2.mipLevels);
 	D3D12_CPU_DESCRIPTOR_HANDLE textureSrvHandleCPU2 = GetCPUDescriptorHandle(srvDescriptorHeap, desriptorSizeSRV, 2);
 	D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPU2 = GetGPUDescriptorHandle(srvDescriptorHeap, desriptorSizeSRV, 2);
-	device->CreateShaderResourceView(textureResource2, &srvDesc2, textureSrvHandleCPU2);
+	device->CreateShaderResourceView(textureResource2.Get(), &srvDesc2, textureSrvHandleCPU2);
 
 #ifdef USE_IMGUI
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
 	ImGui_ImplWin32_Init(hwnd);
-	ImGui_ImplDX12_Init(device, 2, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-	                     srvDescriptorHeap,
+	ImGui_ImplDX12_Init(device.Get(), 2, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+	                     srvDescriptorHeap.Get(),
 	                     srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
 	                     srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 #endif
@@ -668,7 +689,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// RootSignature
 	// 【変更】RootParameterを4つに拡張（DirectionalLight用b1をPixelShaderに追加）
 	// =========================================================================
-	ID3D12RootSignature* rootSignature = nullptr;
+	ComPtr<ID3D12RootSignature> rootSignature;
 	D3D12_ROOT_PARAMETER rootParameters[4]{};
 
 	// b0: Material（PixelShader）
@@ -714,8 +735,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	descriptionRootSignature.NumStaticSamplers = _countof(staticSampler);
 	descriptionRootSignature.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-	ID3DBlob* signatureBlob = nullptr;
-	ID3DBlob* errorBlob     = nullptr;
+	ComPtr<ID3DBlob> signatureBlob;
+	ComPtr<ID3DBlob> errorBlob;
 	hr = D3D12SerializeRootSignature(&descriptionRootSignature, D3D_ROOT_SIGNATURE_VERSION_1,
 	                                  &signatureBlob, &errorBlob);
 	if (FAILED(hr)) { Log(reinterpret_cast<char*>(errorBlob->GetBufferPointer())); assert(false); }
@@ -755,14 +776,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
 	rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
 
-	IDxcBlob* vertexShaderBlob = CompileShader(L"Object3D.VS.hlsl", L"vs_6_0", dxcUtils, dxcCompiler, includeHandler);
+	ComPtr<IDxcBlob> vertexShaderBlob = CompileShader(L"Object3D.VS.hlsl", L"vs_6_0", dxcUtils, dxcCompiler, includeHandler);
 	assert(vertexShaderBlob != nullptr);
-	IDxcBlob* pixelShaderBlob = CompileShader(L"Object3D.PS.hlsl",  L"ps_6_0", dxcUtils, dxcCompiler, includeHandler);
+	ComPtr<IDxcBlob> pixelShaderBlob = CompileShader(L"Object3D.PS.hlsl",  L"ps_6_0", dxcUtils, dxcCompiler, includeHandler);
 	assert(pixelShaderBlob  != nullptr);
 
-	ID3D12PipelineState* graphicsPipelineState = nullptr;
+	ComPtr<ID3D12PipelineState> graphicsPipelineState;
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC graphicsPipelineStateDesc{};
-	graphicsPipelineStateDesc.pRootSignature        = rootSignature;
+	graphicsPipelineStateDesc.pRootSignature        = rootSignature.Get();
 	graphicsPipelineStateDesc.InputLayout           = inputLayoutDesc;
 	graphicsPipelineStateDesc.VS                    = {vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize()};
 	graphicsPipelineStateDesc.PS                    = {pixelShaderBlob->GetBufferPointer(),  pixelShaderBlob->GetBufferSize()};
@@ -784,7 +805,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// =========================================================================
 	// 【変更】TransformationDataリソース（WVP + World の2行列分）
 	// =========================================================================
-	ID3D12Resource* transformationResource = CreateBufferResource(device, sizeof(TransformationData));
+	ComPtr<ID3D12Resource> transformationResource = CreateBufferResource(device, sizeof(TransformationData));
 	TransformationData* transformationData = nullptr;
 	transformationResource->Map(0, nullptr, reinterpret_cast<void**>(&transformationData));
 	transformationData->WVP   = Math::MakeIdentity4x4();
@@ -793,7 +814,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// =========================================================================
 	// 頂点リソースを作る（モデルは既に読み込み済み）
 	// =========================================================================
-	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * modelData.vertices.size());
+	ComPtr<ID3D12Resource> vertexResource = CreateBufferResource(device, sizeof(VertexData) * modelData.vertices.size());
 
 	// 頂点バッファビューを作成する
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
@@ -809,7 +830,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// =========================================================================
 	// マテリアル（モンスターボール用、ライティングON）
 	// =========================================================================
-	ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Material));
+	ComPtr<ID3D12Resource> materialResource = CreateBufferResource(device, sizeof(Material));
 	Material* materialData = nullptr;
 	materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
 	materialData->color          = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -819,7 +840,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// =========================================================================
 	// 【追加】Sprite用マテリアル（ライティングOFF）
 	// =========================================================================
-	ID3D12Resource* materialResourceSprite = CreateBufferResource(device, sizeof(Material));
+	ComPtr<ID3D12Resource> materialResourceSprite = CreateBufferResource(device, sizeof(Material));
 	Material* materialDataSprite = nullptr;
 	materialResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&materialDataSprite));
 	materialDataSprite->color          = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -830,7 +851,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// Sprite頂点データ
 	// =========================================================================
 	// 【変更】Indexを利用するので、重複を除いた4頂点だけ用意する
-	ID3D12Resource* VertexResourcesprite = CreateBufferResource(device, sizeof(VertexData) * 4);
+	ComPtr<ID3D12Resource> VertexResourcesprite = CreateBufferResource(device, sizeof(VertexData) * 4);
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSprite{};
 	vertexBufferViewSprite.BufferLocation = VertexResourcesprite->GetGPUVirtualAddress();
 	vertexBufferViewSprite.SizeInBytes    = sizeof(VertexData) * 4;
@@ -851,7 +872,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	}
 
 	// Sprite用TransformationDataリソース
-	ID3D12Resource* transformationResourceSprite = CreateBufferResource(device, sizeof(TransformationData));
+	ComPtr<ID3D12Resource> transformationResourceSprite = CreateBufferResource(device, sizeof(TransformationData));
 	TransformationData* transformationDataSprite = nullptr;
 	transformationResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&transformationDataSprite));
 	transformationDataSprite->WVP   = Math::MakeIdentity4x4();
@@ -866,7 +887,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		{0.0f, 0.0f, 0.0f},
 	};
 
-	ID3D12Resource* indexresourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
+	ComPtr<ID3D12Resource> indexresourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
 	D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
 	//リソースの先頭アドレスから使う
 	indexBufferViewSprite.BufferLocation = indexresourceSprite->GetGPUVirtualAddress();
@@ -883,7 +904,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// =========================================================================
 	// 【追加】平行光源リソース
 	// =========================================================================
-	ID3D12Resource* directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
+	ComPtr<ID3D12Resource> directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
 	DirectionalLight* directionalLightData = nullptr;
 	directionalLightResource->Map(0, nullptr, reinterpret_cast<void**>(&directionalLightData));
 	// 初期値: 真上から白いライトで照らす
@@ -996,7 +1017,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			D3D12_RESOURCE_BARRIER barrier{};
 			barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 			barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource   = swapChainResources[backBufferIndex];
+			barrier.Transition.pResource   = swapChainResources[backBufferIndex].Get();
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
 			barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
 			commandList->ResourceBarrier(1, &barrier);
@@ -1008,10 +1029,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			commandList->RSSetViewports(1, &viewport);
 			commandList->RSSetScissorRects(1, &scissorRect);
-			commandList->SetGraphicsRootSignature(rootSignature);
-			commandList->SetPipelineState(graphicsPipelineState);
+			commandList->SetGraphicsRootSignature(rootSignature.Get());
+			commandList->SetPipelineState(graphicsPipelineState.Get());
 
-			ID3D12DescriptorHeap* descriptorHeaps[] = {srvDescriptorHeap};
+			ID3D12DescriptorHeap* descriptorHeaps[] = {srvDescriptorHeap.Get()};
 			commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 			// 【追加】平行光源をRootParameter[3]にセット（毎フレーム共通）
@@ -1039,7 +1060,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 #ifdef USE_IMGUI
 			commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
 #endif
 
 			// --- 描画終了 ---
@@ -1048,20 +1069,20 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->ResourceBarrier(1, &barrier);
 
 			hr = commandList->Close(); assert(SUCCEEDED(hr));
-			ID3D12CommandList* commandLists[] = {commandList};
+			ID3D12CommandList* commandLists[] = {commandList.Get()};
 			commandQueue->ExecuteCommandLists(1, commandLists);
 
 			swapChain->Present(1, 0);
 
 			fenceValue++;
-			commandQueue->Signal(fence, fenceValue);
+			commandQueue->Signal(fence.Get(), fenceValue);
 			if (fence->GetCompletedValue() < fenceValue) {
 				fence->SetEventOnCompletion(fenceValue, fenceEvent);
 				WaitForSingleObject(fenceEvent, INFINITE);
 			}
 
 			hr = commandAllocator->Reset(); assert(SUCCEEDED(hr));
-			hr = commandList->Reset(commandAllocator, nullptr); assert(SUCCEEDED(hr));
+			hr = commandList->Reset(commandAllocator.Get(), nullptr); assert(SUCCEEDED(hr));
 
 			logFile << "Loop running..." << std::endl;
 		}
@@ -1069,7 +1090,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	CloseHandle(fenceEvent);
 	fenceValue++;
-	commandQueue->Signal(fence, fenceValue);
+	commandQueue->Signal(fence.Get(), fenceValue);
 	if (fence->GetCompletedValue() < fenceValue) {
 		fence->SetEventOnCompletion(fenceValue, fenceEvent);
 		WaitForSingleObject(fenceEvent, INFINITE);
@@ -1081,56 +1102,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	ImGui::DestroyContext();
 #endif
 
-	// リソース解放
-	if (directionalLightResource)   directionalLightResource->Release();
-	if (materialResourceSprite)     materialResourceSprite->Release();
-	if (materialResource)           materialResource->Release();
-	if (transformationResource)     transformationResource->Release();
-	if (vertexResource)             vertexResource->Release();
-	if (VertexResourcesprite)       VertexResourcesprite->Release();
-	if (transformationResourceSprite) transformationResourceSprite->Release();
-	if (indexresourceSprite)        indexresourceSprite->Release();
-	if (textureresource)            textureresource->Release();
-	if (textureResource2)           textureResource2->Release();
-	if (graphicsPipelineState)      graphicsPipelineState->Release();
-	if (rootSignature)              rootSignature->Release();
-	if (vertexShaderBlob)           vertexShaderBlob->Release();
-	if (pixelShaderBlob)            pixelShaderBlob->Release();
-	if (signatureBlob)              signatureBlob->Release();
-	if (errorBlob)                  errorBlob->Release();
-	if (includeHandler)             includeHandler->Release();
-	if (dxcCompiler)                dxcCompiler->Release();
-	if (dxcUtils)                   dxcUtils->Release();
-	if (depthStencilResource)       depthStencilResource->Release();
-	if (dsvDescriptorHeap)          dsvDescriptorHeap->Release();
-#ifdef USE_IMGUI
-	if (srvDescriptorHeap)          srvDescriptorHeap->Release();
-#endif
-	if (swapChainResources[0])      swapChainResources[0]->Release();
-	if (swapChainResources[1])      swapChainResources[1]->Release();
-	if (rtvDescriptorHeap)          rtvDescriptorHeap->Release();
-	if (swapChain)                  swapChain->Release();
-	if (commandList)                commandList->Release();
-	if (commandAllocator)           commandAllocator->Release();
-	if (commandQueue)               commandQueue->Release();
-	if (fence)                      fence->Release();
-	if (device)                     device->Release();
-	if (useAdapter)                 useAdapter->Release();
-	if (dxgiFactory)                dxgiFactory->Release();
-#ifdef USE_IMGUI
-	if (debugController)            debugController->Release();
-#endif
-
+	// 【変更】ComPtrがスコープを抜けるときに自動的にReleaseしてくれるので、
+	// 手動のReleaseは全部いらなくなる。ComPtrで扱っていないものだけ解放を残すこと
 	CloseWindow(hwnd);
 
-	IDXGIDebug1* debug;
-	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug)))) {
-		debug->ReportLiveObjects(DXGI_DEBUG_ALL,  DXGI_DEBUG_RLO_ALL);
-		debug->ReportLiveObjects(DXGI_DEBUG_APP,  DXGI_DEBUG_RLO_ALL);
-		debug->ReportLiveObjects(DXGI_DEBUG_D3D12, DXGI_DEBUG_RLO_ALL);
-		debug->Release();
-	}
+	} // 【追加】ここで全てのComPtrが解放される（CoUninitializeより前）
 
 	CoUninitialize();
-	return 0;
+	return 0; // 【追加】ここでleakCheckのDestructorが呼ばれ、正しくリークチェックが行われる
 }

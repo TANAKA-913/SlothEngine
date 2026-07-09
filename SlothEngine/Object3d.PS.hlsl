@@ -4,7 +4,7 @@ struct Material
 {
     float4   color;
     int      enableLighting;
-    float3   padding; // 【修正】float[3]だと配列扱いになり要素ごとに16byte消費してC++側(96byte)とズレるためfloat3に変更
+    float3 padding; // 【修正】float[3]だと配列扱いになり要素ごとに16byte消費してC++側(96byte)とズレるためfloat3に変更
     float4x4 uvTransform;
 };
 
