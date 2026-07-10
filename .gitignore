@@ -69,11 +69,7 @@ StyleCopReport.xml
 *_h.h
 *.ilk
 *.meta
-[Dd]bug/.obj
-[Dd]ebug/.obj
-[Dd]ebugPublic/.obj
-[Rr]elease/.obj
-[Rr]eleases/.obj
+*.obj
 *.iobj
 *.pch
 *.pdb
@@ -366,3 +362,4 @@ DirectXGame/imgui.ini
 Dumps/
 
 imgui.ini
+!resources/**/*.obj
