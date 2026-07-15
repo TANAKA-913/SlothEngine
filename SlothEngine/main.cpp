@@ -27,14 +27,17 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
 #include <strsafe.h>
-#include <fstream>
 #include <sstream>
+#include <xaudio2.h>
+
+
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "dxcompiler.lib")
+#pragma comment(lib, "xaudio2.lib")
 
 using Microsoft::WRL::ComPtr; // 【追加】ComPtrを使いやすくする
 
@@ -480,6 +483,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		debugController->SetEnableGPUBasedValidation(TRUE);
 	}
 #endif
+	ComPtr<IXAudio2> xAudio2;
+	IXAudio2MasteringVoice* masteringVoice;
 
 	ComPtr<IDXGIFactory7> dxgiFactory;
 	HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
@@ -640,6 +645,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
 	ComPtr<ID3D12Resource> textureResource2 = CreateTextureResource(device, metadata2);
 	UploadTextureData(textureResource2, mipImages2);
+
+
 
 	ComPtr<ID3D12Resource> depthStencilResource = CreateDepthStencilTextureResource(device, kClientWidth, kClientHeight);
 
