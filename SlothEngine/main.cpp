@@ -27,6 +27,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
 #include <strsafe.h>
+#include <fstream>
 #include <sstream>
 #include <xaudio2.h>
 
@@ -89,6 +90,41 @@ struct MaterialData {
 struct ModelDate {
 	std::vector<VertexData> vertices;
 	MaterialData material; // 【追加】このモデルが使うマテリアル情報
+};
+
+// =============================================================================
+// 【追加】音声データの読み込み用構造体
+// =============================================================================
+// チャンクヘッダ
+struct ChunkHeader
+{
+	char    id[4];   // チャンク毎のID
+	int32_t size;    // チャンクサイズ
+};
+
+// RIFFヘッダチャンク
+struct RiffHeader
+{
+	ChunkHeader chunk; // "RIFF"
+	char        type[4]; // "WAVE"
+};
+
+// FMTチャンク
+struct FormatChunk
+{
+	ChunkHeader   chunk; // "fmt "
+	WAVEFORMATEX  fmt;   // 波形フォーマット
+};
+
+// 音声データ
+struct SoundData
+{
+	// 波形フォーマット
+	WAVEFORMATEX wfex;
+	// バッファの先頭アドレス
+	BYTE* pBuffer;
+	// バッファのサイズ
+	unsigned int bufferSize;
 };
 
 
@@ -448,6 +484,114 @@ ComPtr<ID3D12Resource> CreateDepthStencilTextureResource(const ComPtr<ID3D12Devi
 }
 
 // =============================================================================
+// 【追加】音声データの読み込み
+// ファイル名を指定してのサウンド読み込みを、一つの関数としてまとめる。
+// =============================================================================
+SoundData SoundLoadWave(const char* filename)
+{
+	// ①ファイルオープン
+	// ファイル入力ストリームのインスタンス
+	std::ifstream file;
+	// .wavファイルをバイナリモードで開く
+	file.open(filename, std::ios_base::binary);
+	// ファイルオープン失敗を検出する
+	assert(file.is_open());
+
+	// ②.wavデータ読み込み
+	// RIFFヘッダーの読み込み
+	RiffHeader riff;
+	file.read((char*)&riff, sizeof(riff));
+	// ファイルがRIFFかチェック
+	if (strncmp(riff.chunk.id, "RIFF", 4) != 0) {
+		assert(0);
+	}
+	// タイプがWAVEかチェック
+	if (strncmp(riff.type, "WAVE", 4) != 0) {
+		assert(0);
+	}
+
+	// Formatチャンクの読み込み
+	FormatChunk format = {};
+	// チャンクヘッダの確認
+	file.read((char*)&format, sizeof(ChunkHeader));
+	if (strncmp(format.chunk.id, "fmt ", 4) != 0) {
+		assert(0);
+	}
+	// チャンク本体の読み込み
+	assert(format.chunk.size <= sizeof(format.fmt));
+	file.read((char*)&format.fmt, format.chunk.size);
+
+	// Dataチャンクの読み込み
+	ChunkHeader data;
+	file.read((char*)&data, sizeof(data));
+	// JUNKチャンクを検出した場合
+	if (strncmp(data.id, "JUNK", 4) == 0) {
+		// 読み取り位置をJUNKチャンクの終わりまで進める
+		file.seekg(data.size, std::ios_base::cur);
+		// 再読み込み
+		file.read((char*)&data, sizeof(data));
+	}
+
+	if (strncmp(data.id, "data", 4) != 0) {
+		assert(0);
+	}
+
+	// Dataチャンクのデータ部（音声データ）の読み込み
+	char* pBuffer = new char[data.size];
+	file.read(pBuffer, data.size);
+
+	// Waveファイルを閉じる
+	file.close();
+
+	// returnする為の音声データ
+	SoundData soundData = {};
+
+	soundData.wfex       = format.fmt;
+	soundData.pBuffer    = reinterpret_cast<BYTE*>(pBuffer);
+	soundData.bufferSize = data.size;
+
+	return soundData;
+}
+
+// =============================================================================
+// 【追加】音声データの解放
+// =============================================================================
+void SoundUnload(SoundData* soundData)
+{
+	// バッファのメモリを解放
+	delete[] soundData->pBuffer;
+
+	soundData->pBuffer    = nullptr;
+	soundData->bufferSize = 0;
+	soundData->wfex       = {};
+}
+
+// =============================================================================
+// 【追加】音声再生
+// =============================================================================
+void SoundPlayWave(IXAudio2* xAudio2, const SoundData& soundData)
+{
+	HRESULT result;
+
+	// 波形フォーマットを基にSourceVoiceの生成
+	IXAudio2SourceVoice* pSourceVoice = nullptr;
+	result = xAudio2->CreateSourceVoice(&pSourceVoice, &soundData.wfex);
+	assert(SUCCEEDED(result));
+
+	// 再生する波形データの設定
+	XAUDIO2_BUFFER buf{};
+	buf.pAudioData = soundData.pBuffer;
+	buf.AudioBytes = soundData.bufferSize;
+	buf.Flags      = XAUDIO2_END_OF_STREAM;
+
+	// 波形データの再生
+	result = pSourceVoice->SubmitSourceBuffer(&buf);
+	assert(SUCCEEDED(result));
+	result = pSourceVoice->Start();
+	assert(SUCCEEDED(result));
+}
+
+// =============================================================================
 // 【追加】リソースリークチェッカー
 // Destructorはコンストラクタと逆順で呼ばれる性質を利用し、
 // WinMain内で最初に宣言することで、他の全てのComPtrが解放された後に
@@ -624,6 +768,17 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	Log("Complete create DirectX12 Objects!!!\n");
 
+	// =========================================================================
+	// 【追加】XAudio2の初期化
+	// =========================================================================
+	// XAudioエンジンのインスタンスを生成
+	hr = XAudio2Create(&xAudio2, 0, XAUDIO2_DEFAULT_PROCESSOR);
+	assert(SUCCEEDED(hr));
+
+	// マスターボイスを生成
+	hr = xAudio2->CreateMasteringVoice(&masteringVoice);
+	assert(SUCCEEDED(hr));
+
 	const uint32_t desriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	const uint32_t desriptorSizeRTV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	const uint32_t desriptorSizeDSV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
@@ -645,6 +800,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
 	ComPtr<ID3D12Resource> textureResource2 = CreateTextureResource(device, metadata2);
 	UploadTextureData(textureResource2, mipImages2);
+
+	// =========================================================================
+	// 【追加】音声データの読み込みと再生（resources/mokugyo.wav）
+	// =========================================================================
+	SoundData soundDataMokugyo = SoundLoadWave("resources/mokugyo.wav");
+	SoundPlayWave(xAudio2.Get(), soundDataMokugyo);
 
 
 
@@ -1108,6 +1269,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 #endif
+
+	// 【追加】XAudio2の後始末
+	// 再生中の音声データを解放すると異常停止する可能性があるので、
+	// 必ずReset()でXAUDIO2自体のインスタンスを解放してから
+	// 全音声データを解放すること。
+	xAudio2.Reset();
+
+	// 【追加】音声データの解放
+	// SoundData.pBufferはnewしたメモリなので自分でdeleteする必要がある
+	SoundUnload(&soundDataMokugyo);
 
 	// 【変更】ComPtrがスコープを抜けるときに自動的にReleaseしてくれるので、
 	// 手動のReleaseは全部いらなくなる。ComPtrで扱っていないものだけ解放を残すこと
