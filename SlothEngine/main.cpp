@@ -745,15 +745,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	rtvHandles[1].ptr = rtvHandles[0].ptr + device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	device->CreateRenderTargetView(swapChainResources[1].Get(), &rtvDesc, rtvHandles[1]);
 
+	// 【修正】ImGuiが無効(Release等)でもテクスチャ用SRVは必要なので、#ifdefの外に出す
 	ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
-#ifdef USE_IMGUI
 	D3D12_DESCRIPTOR_HEAP_DESC srvDescriptorHeapDesc{};
 	srvDescriptorHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvDescriptorHeapDesc.NumDescriptors = 3;
 	srvDescriptorHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	hr = device->CreateDescriptorHeap(&srvDescriptorHeapDesc, IID_PPV_ARGS(&srvDescriptorHeap));
 	assert(SUCCEEDED(hr));
-#endif
 
 	ComPtr<ID3D12Fence> fence;
 	uint64_t fenceValue = 0;
@@ -1154,10 +1153,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			BYTE key[256] = {};
 			keyboard->GetDeviceState(sizeof(key), key);
 
-			if (key[DIK_0])
-			{
-				OutputDebugStringA("Hit 0\n");
+			// 【追加】使い方サンプル：数字の0キーが押されていたら
+			if (key[DIK_0]) {
+				OutputDebugStringA("Hit 0\n"); // 出力ウィンドウに「Hit 0」と表示
 			}
+
 #ifdef USE_IMGUI
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
