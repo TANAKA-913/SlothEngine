@@ -31,7 +31,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #include <sstream>
 #include <xaudio2.h>
 
-
+#define DIRECTINPUT_VERSION 0x0800 // 【追加】DirectInputのバージョン指定（dinput.hのインクルードより上に書くこと）
+#include <dinput.h>                // 【追加】DirectInput
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -39,6 +40,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "dxcompiler.lib")
 #pragma comment(lib, "xaudio2.lib")
+#pragma comment(lib, "dinput8.lib") // 【追加】DirectInput
 
 using Microsoft::WRL::ComPtr; // 【追加】ComPtrを使いやすくする
 
@@ -524,16 +526,17 @@ SoundData SoundLoadWave(const char* filename)
 	// Dataチャンクの読み込み
 	ChunkHeader data;
 	file.read((char*)&data, sizeof(data));
-	// JUNKチャンクを検出した場合
-	if (strncmp(data.id, "JUNK", 4) == 0) {
-		// 読み取り位置をJUNKチャンクの終わりまで進める
+	// 【修正】"data"チャンクが見つかるまで、他の種類のチャンク（JUNK, LIST, factなど）を読み飛ばす
+	while (strncmp(data.id, "data", 4) != 0) {
+		// 読み取り位置を今のチャンクの終わりまで進める
 		file.seekg(data.size, std::ios_base::cur);
-		// 再読み込み
+		// 次のチャンクヘッダを読み込む
 		file.read((char*)&data, sizeof(data));
-	}
-
-	if (strncmp(data.id, "data", 4) != 0) {
-		assert(0);
+		// ファイルの終端まで来てしまったら、dataチャンクが無い異常なファイル
+		if (file.eof()) {
+			assert(0);
+			break;
+		}
 	}
 
 	// Dataチャンクのデータ部（音声データ）の読み込み
@@ -777,6 +780,30 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// マスターボイスを生成
 	hr = xAudio2->CreateMasteringVoice(&masteringVoice);
+	assert(SUCCEEDED(hr));
+
+	// =========================================================================
+	// 【追加】DirectInputの初期化（キーボード）
+	// =========================================================================
+	// DirectInputの初期化
+	IDirectInput8* directInput = nullptr;
+	hr = DirectInput8Create(
+	    wc.hInstance, DIRECTINPUT_VERSION, IID_IDirectInput8,
+	    (void**)&directInput, nullptr);
+	assert(SUCCEEDED(hr));
+
+	// キーボードデバイスの生成
+	IDirectInputDevice8* keyboard = nullptr;
+	hr = directInput->CreateDevice(GUID_SysKeyboard, &keyboard, NULL);
+	assert(SUCCEEDED(hr));
+
+	// 入力データ形式のセット
+	hr = keyboard->SetDataFormat(&c_dfDIKeyboard); // 標準形式
+	assert(SUCCEEDED(hr));
+
+	// 排他制御レベルのセット
+	hr = keyboard->SetCooperativeLevel(
+	    hwnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE | DISCL_NOWINKEY);
 	assert(SUCCEEDED(hr));
 
 	const uint32_t desriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -1117,6 +1144,20 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		} else {
+			// =====================================================================
+			// 【追加】DirectX毎フレーム処理の先頭：キーボード情報の取得
+			// =====================================================================
+			// キーボード情報の取得開始
+			keyboard->Acquire();
+
+			// 全キーの入力状態を取得する
+			BYTE key[256] = {};
+			keyboard->GetDeviceState(sizeof(key), key);
+
+			if (key[DIK_0])
+			{
+				OutputDebugStringA("Hit 0\n");
+			}
 #ifdef USE_IMGUI
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
@@ -1279,6 +1320,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 【追加】音声データの解放
 	// SoundData.pBufferはnewしたメモリなので自分でdeleteする必要がある
 	SoundUnload(&soundDataMokugyo);
+
+	// 【追加】DirectInputの後始末
+	keyboard->Unacquire();
+	keyboard->Release();
+	directInput->Release();
 
 	// 【変更】ComPtrがスコープを抜けるときに自動的にReleaseしてくれるので、
 	// 手動のReleaseは全部いらなくなる。ComPtrで扱っていないものだけ解放を残すこと
