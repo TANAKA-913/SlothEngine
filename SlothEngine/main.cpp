@@ -1006,20 +1006,26 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	transformationData->World = Math::MakeIdentity4x4();
 
 	// =========================================================================
-	// 頂点リソースを作る（モデルは既に読み込み済み）
+	// 頂点リソースを作る
+	// 【追加】デバッグ用に球を描画したい場合はここをtrueにする
 	// =========================================================================
-	ComPtr<ID3D12Resource> vertexResource = CreateBufferResource(device, sizeof(VertexData) * modelData.vertices.size());
+	bool kDebugDrawSphere = true;
+	std::vector<VertexData> drawVertices = kDebugDrawSphere
+	    ? CreateSphereVertexData(16)
+	    : modelData.vertices;
+
+	ComPtr<ID3D12Resource> vertexResource = CreateBufferResource(device, sizeof(VertexData) * drawVertices.size());
 
 	// 頂点バッファビューを作成する
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
 	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress(); // リソースの先頭のアドレスから使う
-	vertexBufferView.SizeInBytes    = UINT(sizeof(VertexData) * modelData.vertices.size()); // 使用するリソースのサイズは頂点のサイズ
+	vertexBufferView.SizeInBytes    = UINT(sizeof(VertexData) * drawVertices.size()); // 使用するリソースのサイズは頂点のサイズ
 	vertexBufferView.StrideInBytes  = sizeof(VertexData); // 1頂点あたりのサイズ
 
 	// 頂点リソースにデータを書き込む
 	VertexData* vertexData = nullptr;
 	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData)); // 書き込むためのアドレスを取得
-	std::memcpy(vertexData, modelData.vertices.data(), sizeof(VertexData) * modelData.vertices.size()); // 頂点データをリソースにコピー
+	std::memcpy(vertexData, drawVertices.data(), sizeof(VertexData) * drawVertices.size()); // 頂点データをリソースにコピー
 
 	// =========================================================================
 	// マテリアル（モンスターボール用、ライティングON）
@@ -1255,7 +1261,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2); // 【変更】mtlで指定されたテクスチャを使う
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0); // 【変更】ModelDataの頂点数を利用する
+			commandList->DrawInstanced(UINT(drawVertices.size()), 1, 0, 0); // 【変更】球かモデルか、切り替えた頂点数を利用する
 
 			// -----------------------------------------------------------------
 			// ② Spriteの描画（ライティングなし）
