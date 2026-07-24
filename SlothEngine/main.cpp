@@ -10,6 +10,7 @@
 
 #include "Math.h"
 #include "Matrix4x4.h"
+#include "DebugCamera.h"
 
 #include "externals/DirectXTex/DirectXTex.h"
 
@@ -1143,6 +1144,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	    Vector3{0.0f, 0.0f, -5.0f}
 	};
 
+	// 【追加】デバッグカメラ
+	DebugCamera debugCamera;
+	debugCamera.Initialize();
+	// デバッグカメラが有効かどうか（Enter or Spaceで切り替える）
+	bool isDebugCameraActive = false;
+	// 前フレームのキー入力状態（トグルのエッジ検出用）
+	BYTE preKey[256] = {};
+
 	MSG msg{};
 	while (msg.message != WM_QUIT) {
 		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -1162,6 +1171,20 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// 【追加】使い方サンプル：数字の0キーが押されていたら
 			if (key[DIK_0]) {
 				OutputDebugStringA("Hit 0\n"); // 出力ウィンドウに「Hit 0」と表示
+			}
+
+			// =====================================================================
+			// 【追加】Enter or Spaceでデバッグカメラの有効・無効を切り替える
+			// （押した瞬間だけ反応させるため、前フレームの状態と比較する）
+			// =====================================================================
+			if ((key[DIK_RETURN] && !preKey[DIK_RETURN]) ||
+			    (key[DIK_SPACE]  && !preKey[DIK_SPACE])) {
+				isDebugCameraActive = !isDebugCameraActive;
+			}
+
+			// デバッグカメラが有効なら、入力を渡して更新する
+			if (isDebugCameraActive) {
+				debugCamera.Update(key);
 			}
 
 #ifdef USE_IMGUI
@@ -1198,10 +1221,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			Matrix4x4 worldMatrix = Math::MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
 
 			// ビュー・プロジェクション行列
-			Matrix4x4 cameraMatrix     = Math::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
-			Matrix4x4 viewMatrix       = Math::Inverse(cameraMatrix);
-			float aspectRatio          = static_cast<float>(kClientWidth) / static_cast<float>(kClientHeight);
-			Matrix4x4 projectionMatrix = Math::MakePerspectiveFovMatrix(0.45f, aspectRatio, 0.1f, 100.0f);
+			// 【変更】デバッグカメラが有効な場合はそちらの行列を使う
+			Matrix4x4 viewMatrix;
+			Matrix4x4 projectionMatrix;
+			if (isDebugCameraActive) {
+				viewMatrix       = debugCamera.viewMatrix_;
+				projectionMatrix = debugCamera.projectionMatrix_;
+			} else {
+				Matrix4x4 cameraMatrix = Math::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
+				viewMatrix             = Math::Inverse(cameraMatrix);
+				float aspectRatio      = static_cast<float>(kClientWidth) / static_cast<float>(kClientHeight);
+				projectionMatrix       = Math::MakePerspectiveFovMatrix(0.45f, aspectRatio, 0.1f, 100.0f);
+			}
 			Matrix4x4 wvpMatrix        = Math::Multiply(worldMatrix, Math::Multiply(viewMatrix, projectionMatrix));
 
 			// 【変更】WVPとWorldの両方を転送
@@ -1298,6 +1329,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			hr = commandAllocator->Reset(); assert(SUCCEEDED(hr));
 			hr = commandList->Reset(commandAllocator.Get(), nullptr); assert(SUCCEEDED(hr));
+
+			// 【追加】次フレームのトグル判定用に今回のキー状態を保存する
+			memcpy(preKey, key, sizeof(key));
 
 			logFile << "Loop running..." << std::endl;
 		}

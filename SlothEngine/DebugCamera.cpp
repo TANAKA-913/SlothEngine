@@ -74,13 +74,15 @@ void DebugCamera::Update(const unsigned char* key) {
 	}
 
 	// --- 上下移動 ---
-	if (key[DIK_SPACE]) {
+	// 【変更】Space/Enterはデバッグカメラの有効・無効切り替えに使うため、
+	//        上下移動はR（上）/F（下）キーに割り当てる。
+	if (key[DIK_R]) {
 		const float speed = kMoveSpeed; // 上移動の速さ
 		Vector3 move = {0.0f, speed, 0.0f};
 		move = Math::Transform(move, matRot_);
 		translation_ = Math::Add(translation_, move);
 	}
-	if (key[DIK_LCONTROL]) {
+	if (key[DIK_F]) {
 		const float speed = -kMoveSpeed; // 下移動の速さ
 		Vector3 move = {0.0f, speed, 0.0f};
 		move = Math::Transform(move, matRot_);
