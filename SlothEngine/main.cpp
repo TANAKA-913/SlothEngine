@@ -1231,7 +1231,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
 			ImGui::NewFrame();
-			ImGui::ShowDemoWindow();
 			// 【変更】自動回転の代わりにImGuiでTransformを操作できるようにする
 			ImGui::Begin("Transform");
 			ImGui::DragFloat3("Translate", &transform.translate.x, 0.01f);
