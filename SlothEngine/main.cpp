@@ -12,6 +12,7 @@
 #include "Matrix4x4.h"
 #include "DebugCamera.h"
 
+#include "externals/DirectXTex/d3dx12.h"
 #include "externals/DirectXTex/DirectXTex.h"
 
 #ifdef USE_IMGUI
@@ -31,6 +32,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #include <fstream>
 #include <sstream>
 #include <xaudio2.h>
+#include <vector>
 
 #define DIRECTINPUT_VERSION 0x0800 // 【追加】DirectInputのバージョン指定（dinput.hのインクルードより上に書くこと）
 #include <dinput.h>                // 【追加】DirectInput
@@ -421,27 +423,40 @@ ComPtr<ID3D12Resource> CreateTextureResource(const ComPtr<ID3D12Device>& device,
 	resourceDesc.Dimension        = D3D12_RESOURCE_DIMENSION(metadata.dimension);
 
 	D3D12_HEAP_PROPERTIES heapProperties{};
-	heapProperties.Type                 = D3D12_HEAP_TYPE_CUSTOM;
+	heapProperties.Type                 = D3D12_HEAP_TYPE_DEFAULT;
 	heapProperties.CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_WRITE_BACK;
 	heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_L0;
 
 	ComPtr<ID3D12Resource> resource;
 	HRESULT hr = device->CreateCommittedResource(
 	    &heapProperties, D3D12_HEAP_FLAG_NONE,
-	    &resourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
+	    &resourceDesc, D3D12_RESOURCE_STATE_COPY_DEST,
 	    nullptr, IID_PPV_ARGS(&resource));
 	assert(SUCCEEDED(hr));
 	return resource;
 }
 
-void UploadTextureData(const ComPtr<ID3D12Resource>& texture, const DirectX::ScratchImage& mipimage) {
-	const DirectX::TexMetadata& metadata = mipimage.GetMetadata();
-	for (size_t mipLevel = 0; mipLevel < metadata.mipLevels; ++mipLevel) {
-		const DirectX::Image* ima = mipimage.GetImage(mipLevel, 0, 0);
-		HRESULT hr = texture->WriteToSubresource(
-		    UINT(mipLevel), nullptr, ima->pixels, UINT(ima->rowPitch), UINT(ima->slicePitch));
-		assert(SUCCEEDED(hr));
-	}
+[[nodiscard]]
+ComPtr<ID3D12Resource> UploadTextureData(
+    ID3D12Resource* texture, const DirectX::ScratchImage& mipImages, ID3D12Device* device,
+    ID3D12GraphicsCommandList* commandList)
+{
+	std::vector<D3D12_SUBRESOURCE_DATA> subresources;
+	DirectX::PrepareUpload(device, mipImages.GetImages(), mipImages.GetImageCount(), mipImages.GetMetadata(), subresources);
+	uint64_t intermediateSize = GetRequiredIntermediateSize(texture, 0, UINT(subresources.size()));
+	ComPtr<ID3D12Resource> intermediateResource = CreateBufferResource(device, intermediateSize);
+	UpdateSubresources(commandList, texture, intermediateResource.Get(), 0, 0, UINT(subresources.size()), subresources.data());
+
+	// Textureへの転送後は利用できるよう、D3D12_RESOURCE_STATE_COPY_DESTからD3D12_RESOURCE_STATE_GENERIC_READへResourceStateを変更する
+	D3D12_RESOURCE_BARRIER barrier{};
+	barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+	barrier.Transition.pResource   = texture;
+	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+	barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_GENERIC_READ;
+	commandList->ResourceBarrier(1, &barrier);
+	return intermediateResource;
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE GetCPUDescriptorHandle(
@@ -820,13 +835,40 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	DirectX::ScratchImage mipmapImage = LoadTexture("resources/uvChecker.png");
 	const DirectX::TexMetadata& metadata = mipmapImage.GetMetadata();
 	ComPtr<ID3D12Resource> textureresource = CreateTextureResource(device, metadata);
-	UploadTextureData(textureresource, mipmapImage);
+	ComPtr<ID3D12Resource> intermediateResource = UploadTextureData(textureresource.Get(), mipmapImage, device.Get(), commandList.Get());
 
 	// 【変更】モデルに貼るテクスチャはmtlファイルで指定されたものを使う
 	DirectX::ScratchImage mipImages2 = LoadTexture(modelData.material.textureFilePath);
 	const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
 	ComPtr<ID3D12Resource> textureResource2 = CreateTextureResource(device, metadata2);
-	UploadTextureData(textureResource2, mipImages2);
+	ComPtr<ID3D12Resource> intermediateResource2 = UploadTextureData(textureResource2.Get(), mipImages2, device.Get(), commandList.Get());
+
+	// コマンドを実行して完了を待つ
+	// commandListをCloseし、commandQueue->ExecuteCommandListsを使いキックする
+	hr = commandList->Close();
+	assert(SUCCEEDED(hr));
+	{
+		ID3D12CommandList* commandLists[] = {commandList.Get()};
+		commandQueue->ExecuteCommandLists(1, commandLists);
+	}
+
+	// 実行を待つ
+	fenceValue++;
+	commandQueue->Signal(fence.Get(), fenceValue);
+	if (fence->GetCompletedValue() < fenceValue) {
+		fence->SetEventOnCompletion(fenceValue, fenceEvent);
+		WaitForSingleObject(fenceEvent, INFINITE);
+	}
+
+	// 実行が完了したので、allocatorとcommandListをResetして次のコマンドを積めるようにする
+	hr = commandAllocator->Reset();
+	assert(SUCCEEDED(hr));
+	hr = commandList->Reset(commandAllocator.Get(), nullptr);
+	assert(SUCCEEDED(hr));
+
+	// ここまでできたら転送は終わっているので、intermediateResourceはReleaseしても良い
+	intermediateResource.Reset();
+	intermediateResource2.Reset();
 
 	// =========================================================================
 	// 【追加】音声データの読み込みと再生（resources/mokugyo.wav）
