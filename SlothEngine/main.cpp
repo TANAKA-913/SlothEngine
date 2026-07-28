@@ -60,12 +60,23 @@ struct Transform {
 };
 
 // 【変更】enableLightingを追加、【追加】uvTransform用にpadding+行列を追加
+// 【変更】enableLightingは「Lightingの方式」を表す値として使う
+//         0:Lightingなし 1:Lambert 2:HalfLambert （シェーダー側と対応させる）
 struct Material {
 	Vector4   color;
 	int32_t   enableLighting;
 	float     padding[3];
 	Matrix4x4 uvTransform;
 };
+
+// 【追加】Lighting方式（ImGuiのコンボボックスやMaterialへの設定に使う）
+enum LightingMode : int32_t {
+	kLightingModeNone        = 0, // Lightingなし
+	kLightingModeLambert     = 1, // Lambert反射
+	kLightingModeHalfLambert = 2, // Half Lambert反射
+};
+// 【追加】ImGuiのコンボボックスに表示する項目名
+static const char* kLightingModeNames[] = {"None", "Lambert", "HalfLambert"};
 
 // 【変更】法線フィールドを追加
 struct VertexData {
@@ -259,9 +270,6 @@ ModelDate LoadObjectFile(const std::string& directoryPath, const std::string& fi
 				Vector4 position = positions[elementIndices[0] - 1];
 				Vector2 texcoord = texcoords[elementIndices[1] - 1];
 				Vector3 normal = normals[elementIndices[2] - 1];
-				// 【追加】右手系->左手系への変換。位置と法線のxを反転する
-				position.x *= -1.0f;
-				normal.x *= -1.0f;
 				triangle[faceVertex] = { position, texcoord, normal };
 			}
 			// 【追加】頂点を逆順で登録することで、回り順を逆にする（左手系用）
@@ -869,10 +877,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	intermediateResource2.Reset();
 
 	// =========================================================================
-	// 【追加】音声データの読み込みと再生（resources/mokugyo.wav）
+	// 【追加】音声データの読み込み（resources/mokugyo.wav）
+	// 　　　　再生はImGuiの「Sound」ウィンドウのボタンを押した時のみ行う
 	// =========================================================================
 	SoundData soundDataMokugyo = SoundLoadWave("resources/mokugyo.wav");
-	SoundPlayWave(xAudio2.Get(), soundDataMokugyo);
 
 
 
@@ -1038,6 +1046,20 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 
 	// =========================================================================
+	// 【追加】Sprite専用のPSO
+	// 　　　　Spriteは常に手前に表示したい2Dの板なので、深度テストを行わない
+	// 　　　　（回転させてZがどんな値になっても、3Dオブジェクトとの前後関係で
+	// 　　　　　消えたり隠れたりしないようにする）
+	// =========================================================================
+	ComPtr<ID3D12PipelineState> spriteGraphicsPipelineState;
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC spritePipelineStateDesc = graphicsPipelineStateDesc;
+	spritePipelineStateDesc.DepthStencilState.DepthEnable    = FALSE;
+	spritePipelineStateDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+	hr = device->CreateGraphicsPipelineState(&spritePipelineStateDesc, IID_PPV_ARGS(&spriteGraphicsPipelineState));
+	assert(SUCCEEDED(hr));
+
+	// =========================================================================
 	// 【変更】TransformationDataリソース（WVP + World の2行列分）
 	// =========================================================================
 	ComPtr<ID3D12Resource> transformationResource = CreateBufferResource(device, sizeof(TransformationData));
@@ -1048,25 +1070,40 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// =========================================================================
 	// 頂点リソースを作る
-	// 【追加】デバッグ用に球を描画したい場合はここをtrueにする
+	// 【変更】球とobjモデルの両方の頂点バッファを用意しておき、
+	// 　　　　ImGuiで実行時にどちらを描画するか切り替えられるようにする
 	// =========================================================================
-	bool kDebugDrawSphere = true;
-	std::vector<VertexData> drawVertices = kDebugDrawSphere
-	    ? CreateSphereVertexData(16)
-	    : modelData.vertices;
+	std::vector<VertexData> sphereVertices = CreateSphereVertexData(16);
 
-	ComPtr<ID3D12Resource> vertexResource = CreateBufferResource(device, sizeof(VertexData) * drawVertices.size());
+	ComPtr<ID3D12Resource> vertexResourceSphere = CreateBufferResource(device, sizeof(VertexData) * sphereVertices.size());
 
-	// 頂点バッファビューを作成する
-	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
-	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress(); // リソースの先頭のアドレスから使う
-	vertexBufferView.SizeInBytes    = UINT(sizeof(VertexData) * drawVertices.size()); // 使用するリソースのサイズは頂点のサイズ
-	vertexBufferView.StrideInBytes  = sizeof(VertexData); // 1頂点あたりのサイズ
+	// 球用の頂点バッファビュー
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSphere{};
+	vertexBufferViewSphere.BufferLocation = vertexResourceSphere->GetGPUVirtualAddress();
+	vertexBufferViewSphere.SizeInBytes    = UINT(sizeof(VertexData) * sphereVertices.size());
+	vertexBufferViewSphere.StrideInBytes  = sizeof(VertexData);
 
-	// 頂点リソースにデータを書き込む
-	VertexData* vertexData = nullptr;
-	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData)); // 書き込むためのアドレスを取得
-	std::memcpy(vertexData, drawVertices.data(), sizeof(VertexData) * drawVertices.size()); // 頂点データをリソースにコピー
+	// 球の頂点リソースにデータを書き込む
+	VertexData* vertexDataSphere = nullptr;
+	vertexResourceSphere->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataSphere));
+	std::memcpy(vertexDataSphere, sphereVertices.data(), sizeof(VertexData) * sphereVertices.size());
+
+	// objモデル用の頂点バッファ
+	ComPtr<ID3D12Resource> vertexResourceObj = CreateBufferResource(device, sizeof(VertexData) * modelData.vertices.size());
+
+	// objモデル用の頂点バッファビュー
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewObj{};
+	vertexBufferViewObj.BufferLocation = vertexResourceObj->GetGPUVirtualAddress();
+	vertexBufferViewObj.SizeInBytes    = UINT(sizeof(VertexData) * modelData.vertices.size());
+	vertexBufferViewObj.StrideInBytes  = sizeof(VertexData);
+
+	// objモデルの頂点リソースにデータを書き込む
+	VertexData* vertexDataObj = nullptr;
+	vertexResourceObj->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataObj));
+	std::memcpy(vertexDataObj, modelData.vertices.data(), sizeof(VertexData) * modelData.vertices.size());
+
+	// 【追加】ImGuiで切り替えるための実行時フラグ（true:球 / false:objモデル）
+	bool isDrawSphere = true;
 
 	// =========================================================================
 	// マテリアル（モンスターボール用、ライティングON）
@@ -1075,8 +1112,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Material* materialData = nullptr;
 	materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
 	materialData->color          = {1.0f, 1.0f, 1.0f, 1.0f};
-	materialData->enableLighting = true; // 【追加】ライティング有効
-	materialData->uvTransform    = Math::MakeIdentity4x4(); // 【追加】UVTransform初期化
+	materialData->enableLighting = kLightingModeHalfLambert; // 初期値はHalf Lambert
+	materialData->uvTransform    = Math::MakeIdentity4x4();
 
 	// =========================================================================
 	// 【追加】Sprite用マテリアル（ライティングOFF）
@@ -1085,7 +1122,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Material* materialDataSprite = nullptr;
 	materialResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&materialDataSprite));
 	materialDataSprite->color          = {1.0f, 1.0f, 1.0f, 1.0f};
-	materialDataSprite->enableLighting = false; // SpriteにはLightingしない
+	materialDataSprite->enableLighting = kLightingModeNone; // SpriteにはLightingしない
 	materialDataSprite->uvTransform    = Math::MakeIdentity4x4(); // 【追加】UVTransform初期化
 
 	// =========================================================================
@@ -1184,6 +1221,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	    Vector3{0.0f, 0.0f, -5.0f}
 	};
 
+	// 【追加】Spriteを描画するかどうか（ImGuiのチェックボックスで切り替え）
+	bool isDrawSprite = true;
+
 	// 【追加】デバッグカメラ
 	DebugCamera debugCamera;
 	debugCamera.Initialize();
@@ -1231,11 +1271,26 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
 			ImGui::NewFrame();
+			// 【追加】球とobjモデルの描画切り替え
+			ImGui::Begin("Draw Mode");
+			if (ImGui::RadioButton("Sphere", isDrawSphere)) { isDrawSphere = true; }
+			ImGui::SameLine();
+			if (ImGui::RadioButton("Obj", !isDrawSphere))   { isDrawSphere = false; }
+			ImGui::End();
+
 			// 【変更】自動回転の代わりにImGuiでTransformを操作できるようにする
 			ImGui::Begin("Transform");
 			ImGui::DragFloat3("Translate", &transform.translate.x, 0.01f);
 			ImGui::DragFloat3("Rotate", &transform.rotate.x, 0.01f);
 			ImGui::DragFloat3("Scale", &transform.scale.x, 0.01f);
+			ImGui::End();
+
+			// 【追加】3Dオブジェクト（球/objモデル）のMaterial編集
+			// 　　　　モデル描画のLighting方式を None / Lambert / HalfLambert の
+			// 　　　　3つから動的に切り替えられるようにする
+			ImGui::Begin("Material");
+			ImGui::ColorEdit4("color", &materialData->color.x);
+			ImGui::Combo("Lighting", &materialData->enableLighting, kLightingModeNames, _countof(kLightingModeNames));
 			ImGui::End();
 
 			// 【任意】ImGuiでライト設定を変更できるようにする
@@ -1245,14 +1300,30 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			ImGui::SliderFloat("intensity", &directionalLightData->intensity, 0.0f, 1.0f);
 			ImGui::End();
 
+			// 【追加】SpriteのTransform（SRT）編集 ＋ 描画のオンオフ
+			ImGui::Begin("Sprite Transform");
+			ImGui::Checkbox("Draw Sprite", &isDrawSprite); // 【追加】Spriteの描画on/off
+			ImGui::DragFloat3("Translate", &transformSprite.translate.x, 1.0f);
+			ImGui::DragFloat3("Rotate", &transformSprite.rotate.x, 0.01f);
+			ImGui::DragFloat3("Scale", &transformSprite.scale.x, 0.01f);
+			ImGui::End();
+
 			// 【追加】Sprite用UVTransformの編集
 			ImGui::Begin("UVTransform");
 			ImGui::DragFloat2("UVTranslate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
 			ImGui::DragFloat2("UVScale", &uvTransformSprite.scale.x, 0.01f, -10.0f, 10.0f);
 			ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
 			ImGui::End();
+
+			// 【追加】ボタンを押すたびに一度だけ音声を再生する
+			ImGui::Begin("Sound");
+			if (ImGui::Button("Play")) {
+				SoundPlayWave(xAudio2.Get(), soundDataMokugyo);
+			}
+			ImGui::End();
 #endif
 
+			// Update
 			// Update
 			// 【変更】自動回転は廃止（ImGuiのTransformパネルで手動操作）
 
@@ -1281,7 +1352,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// Sprite用行列更新
 			Matrix4x4 worldMatrixSprite      = Math::MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
 			Matrix4x4 viewMatrixSprite       = Math::MakeIdentity4x4();
-			Matrix4x4 projectionMatrixSprite = Math::MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
+			// 【修正】nearを0にしていると、Spriteを回転させた時にZがマイナス側へ出た瞬間
+			// 　　　　クリップされて消えてしまうため、near/farを広く取っておく
+			Matrix4x4 projectionMatrixSprite = Math::MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), -1000.0f, 1000.0f);
 			Matrix4x4 wvpMatrixSprite        = Math::Multiply(worldMatrixSprite, Math::Multiply(viewMatrixSprite, projectionMatrixSprite));
 			transformationDataSprite->WVP    = wvpMatrixSprite;
 			transformationDataSprite->World  = worldMatrixSprite;
@@ -1324,24 +1397,39 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
 
 			// -----------------------------------------------------------------
-			// ① 3Dオブジェクト（モンスターボール）の描画
+			// ① 3Dオブジェクト（球 or モンスターボール）の描画
+			// 　　【変更】ImGuiのDraw Modeウィンドウで選んだ方を描画する
 			// -----------------------------------------------------------------
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootConstantBufferView(1, transformationResource->GetGPUVirtualAddress());
-			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2); // 【変更】mtlで指定されたテクスチャを使う
-			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			commandList->DrawInstanced(UINT(drawVertices.size()), 1, 0, 0); // 【変更】球かモデルか、切り替えた頂点数を利用する
+			if (isDrawSphere) {
+				// 球はmtlテクスチャを持たないのでuvChecker.pngを使う
+				commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
+				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSphere);
+				commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				commandList->DrawInstanced(UINT(sphereVertices.size()), 1, 0, 0);
+			} else {
+				// objモデルはmtlで指定されたテクスチャを使う
+				commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2);
+				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewObj);
+				commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
+			}
 
 			// -----------------------------------------------------------------
 			// ② Spriteの描画（ライティングなし）
+			// 　　【追加】isDrawSpriteがfalseのときは描画自体をスキップする
 			// -----------------------------------------------------------------
-			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress()); // 【変更】Sprite用マテリアル
-			commandList->SetGraphicsRootConstantBufferView(1, transformationResourceSprite->GetGPUVirtualAddress());
-			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
-			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
-			commandList->IASetIndexBuffer(&indexBufferViewSprite);
-			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+			if (isDrawSprite) {
+				// 【追加】深度テストなしのSprite専用PSOに切り替える
+				commandList->SetPipelineState(spriteGraphicsPipelineState.Get());
+				commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress()); // 【変更】Sprite用マテリアル
+				commandList->SetGraphicsRootConstantBufferView(1, transformationResourceSprite->GetGPUVirtualAddress());
+				commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
+				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
+				commandList->IASetIndexBuffer(&indexBufferViewSprite);
+				commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+			}
 
 #ifdef USE_IMGUI
 			commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
