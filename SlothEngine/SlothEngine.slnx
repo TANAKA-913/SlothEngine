@@ -8,10 +8,6 @@
   <Folder Name="/ソリューション項目/">
     <File Path=".editorconfig" />
   </Folder>
-  <Project Path="externals/DirectXTex/DirectXTex_Desktop_2022_Win10.vcxproj" Id="371b9fa9-4c90-4ac6-a123-aced756d6c77">
-    <BuildType Solution="Debug|*" Project="Development" />
-  </Project>
-  <Project Path="SlothEngine.vcxproj" Id="a5247a8c-2fc7-4cfe-aee9-81d98016c3db">
-    <BuildType Solution="Debug|*" Project="Development" />
-  </Project>
+  <Project Path="externals/DirectXTex/DirectXTex_Desktop_2022_Win10.vcxproj" Id="371b9fa9-4c90-4ac6-a123-aced756d6c77" />
+  <Project Path="SlothEngine.vcxproj" Id="a5247a8c-2fc7-4cfe-aee9-81d98016c3db" />
 </Solution>
