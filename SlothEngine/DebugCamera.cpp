@@ -1,10 +1,7 @@
 #include "DebugCamera.h"
 #include "Math.h"
 
-#include <Windows.h>
-#define DIRECTINPUT_VERSION 0x0800 // DirectInputのバージョン指定（dinput.hより上に書くこと）
-#include <dinput.h>
-#pragma comment(lib, "dinput8.lib")
+#include "Input.h"
 
 namespace {
 	// 移動速度
@@ -34,7 +31,7 @@ void DebugCamera::Initialize() {
 	viewMatrix_ = Math::Inverse(worldMatrix);
 }
 
-void DebugCamera::Update(const unsigned char* key) {
+void DebugCamera::Update(Input* input) {
 	// =====================================================
 	// 1. 入力によるカメラの移動や回転
 	// =====================================================
@@ -42,7 +39,7 @@ void DebugCamera::Update(const unsigned char* key) {
 	// --- 前後移動 ---
 	// 自キャラが向いている方向に弾を発射する処理と同じ考え方。
 	// 角度は毎フレーム変わる可能性があるので、前進ベクトル（速度）は毎回計算する。
-	if (key[DIK_W]) {
+	if (input->PushKey(DIK_W)) {
 		const float speed = kMoveSpeed; // 前進の速さ
 		// カメラ移動ベクトル
 		Vector3 move = {0.0f, 0.0f, speed};
@@ -51,7 +48,7 @@ void DebugCamera::Update(const unsigned char* key) {
 		// 移動ベクトル分だけ座標を加算する
 		translation_ = Math::Add(translation_, move);
 	}
-	if (key[DIK_S]) {
+	if (input->PushKey(DIK_S)) {
 		const float speed = -kMoveSpeed; // 後退の速さ
 		Vector3 move = {0.0f, 0.0f, speed};
 		move = Math::Transform(move, matRot_);
@@ -60,13 +57,13 @@ void DebugCamera::Update(const unsigned char* key) {
 
 	// --- 左右移動 ---
 	// 前進／後退と同じ仕組みで実装できる。
-	if (key[DIK_D]) {
+	if (input->PushKey(DIK_D)) {
 		const float speed = kMoveSpeed; // 右移動の速さ
 		Vector3 move = {speed, 0.0f, 0.0f};
 		move = Math::Transform(move, matRot_);
 		translation_ = Math::Add(translation_, move);
 	}
-	if (key[DIK_A]) {
+	if (input->PushKey(DIK_A)) {
 		const float speed = -kMoveSpeed; // 左移動の速さ
 		Vector3 move = {speed, 0.0f, 0.0f};
 		move = Math::Transform(move, matRot_);
@@ -76,13 +73,13 @@ void DebugCamera::Update(const unsigned char* key) {
 	// --- 上下移動 ---
 	// 【変更】Space/Enterはデバッグカメラの有効・無効切り替えに使うため、
 	//        上下移動はR（上）/F（下）キーに割り当てる。
-	if (key[DIK_R]) {
+	if (input->PushKey(DIK_R)) {
 		const float speed = kMoveSpeed; // 上移動の速さ
 		Vector3 move = {0.0f, speed, 0.0f};
 		move = Math::Transform(move, matRot_);
 		translation_ = Math::Add(translation_, move);
 	}
-	if (key[DIK_F]) {
+	if (input->PushKey(DIK_F)) {
 		const float speed = -kMoveSpeed; // 下移動の速さ
 		Vector3 move = {0.0f, speed, 0.0f};
 		move = Math::Transform(move, matRot_);
@@ -95,24 +92,24 @@ void DebugCamera::Update(const unsigned char* key) {
 	Matrix4x4 matRotDelta = Math::MakeIdentity4x4();
 
 	// X軸周り回転の入力があったら、X軸周りの回転を加算する
-	if (key[DIK_UP]) {
+	if (input->PushKey(DIK_UP)) {
 		matRotDelta = Math::Multiply(matRotDelta, Math::MakeRotateXMatrix(-kRotSpeed));
 	}
-	if (key[DIK_DOWN]) {
+	if (input->PushKey(DIK_DOWN)) {
 		matRotDelta = Math::Multiply(matRotDelta, Math::MakeRotateXMatrix(kRotSpeed));
 	}
 	// Y軸周り回転の入力があったら、Y軸周りの回転を加算する
-	if (key[DIK_LEFT]) {
+	if (input->PushKey(DIK_LEFT)) {
 		matRotDelta = Math::Multiply(matRotDelta, Math::MakeRotateYMatrix(-kRotSpeed));
 	}
-	if (key[DIK_RIGHT]) {
+	if (input->PushKey(DIK_RIGHT)) {
 		matRotDelta = Math::Multiply(matRotDelta, Math::MakeRotateYMatrix(kRotSpeed));
 	}
 	// Z軸周り回転の入力があったら、Z軸周りの回転を加算する
-	if (key[DIK_Q]) {
+	if (input->PushKey(DIK_Q)) {
 		matRotDelta = Math::Multiply(matRotDelta, Math::MakeRotateZMatrix(-kRotSpeed));
 	}
-	if (key[DIK_E]) {
+	if (input->PushKey(DIK_E)) {
 		matRotDelta = Math::Multiply(matRotDelta, Math::MakeRotateZMatrix(kRotSpeed));
 	}
 

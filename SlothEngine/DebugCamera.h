@@ -2,6 +2,8 @@
 #include "Vector3.h"
 #include "Matrix4x4.h"
 
+class Input;
+
 /// <summary>
 /// デバッグ用フリーカメラ
 /// </summary>
@@ -28,6 +30,6 @@ public:
 	/// <summary>
 	/// 更新
 	/// </summary>
-	/// <param name="key">DirectInputで取得したキーボードの入力状態（256バイト配列）</param>
-	void Update(const unsigned char* key);
+	/// <param name="input">入力</param>
+	void Update(Input* input);
 };

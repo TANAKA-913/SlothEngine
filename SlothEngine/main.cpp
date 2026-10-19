@@ -1209,8 +1209,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	debugCamera.Initialize();
 	// デバッグカメラが有効かどうか（Enter or Spaceで切り替える）
 	bool isDebugCameraActive = false;
-	// 前フレームのキー入力状態（トグルのエッジ検出用）
-	BYTE preKey[256] = {};
 
 	MSG msg{};
 	while (msg.message != WM_QUIT) {
@@ -1225,22 +1223,21 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			input->Update();
 
 			// 使い方サンプル：数字の0キーが押されていたら
-			if (key[DIK_0]) {
+			if (input->PushKey(DIK_0)) { // 数字の0キーが押されていたら
 				OutputDebugStringA("Hit 0\n"); // 出力ウィンドウに「Hit 0」と表示
 			}
 
 			// =====================================================================
 			// Enter or Spaceでデバッグカメラの有効・無効を切り替える
-			// （押した瞬間だけ反応させるため、前フレームの状態と比較する）
+			// （押した瞬間だけ反応させるため、TriggerKeyを使う）
 			// =====================================================================
-			if ((key[DIK_RETURN] && !preKey[DIK_RETURN]) ||
-			    (key[DIK_SPACE]  && !preKey[DIK_SPACE])) {
+			if (input->TriggerKey(DIK_RETURN) || input->TriggerKey(DIK_SPACE)) {
 				isDebugCameraActive = !isDebugCameraActive;
 			}
 
 			// デバッグカメラが有効なら、入力を渡して更新する
 			if (isDebugCameraActive) {
-				debugCamera.Update(key);
+				debugCamera.Update(input);
 			}
 
 #ifdef USE_IMGUI
@@ -1448,8 +1445,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			hr = commandAllocator->Reset(); assert(SUCCEEDED(hr));
 			hr = commandList->Reset(commandAllocator.Get(), nullptr); assert(SUCCEEDED(hr));
 
-			// 　次フレームのトグル判定用に今回のキー状態を保存する
-			memcpy(preKey, key, sizeof(key));
 
 			logFile << "Loop running..." << std::endl;
 		}
