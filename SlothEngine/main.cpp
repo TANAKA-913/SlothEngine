@@ -34,8 +34,6 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #include <sstream>
 #include <xaudio2.h>
 #include <vector>
-#define DIRECTINPUT_VERSION 0x0800 // DirectInputのバージョン指定（dinput.hのインクルードより上に書くこと）
-#include <dinput.h>                // DirectInput
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -43,7 +41,6 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "dxcompiler.lib")
 #pragma comment(lib, "xaudio2.lib")
-#pragma comment(lib, "dinput8.lib") // DirectInput
 
 using Microsoft::WRL::ComPtr; // ComPtrを使いやすくする
 
@@ -803,10 +800,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	hr = xAudio2->CreateMasteringVoice(&masteringVoice);
 	assert(SUCCEEDED(hr));
 
-	//ポインタ
+	// ポインタ
 	Input* input = nullptr;
 
-	//入力の初期化
+	// 入力の初期化
 	input = new Input();
 	input->Initialize(wc.hInstance, hwnd);
 	
@@ -1224,12 +1221,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// =====================================================================
 			// DirectX毎フレーム処理の先頭：キーボード情報の取得
 			// =====================================================================
-			// キーボード情報の取得開始
-			keyboard->Acquire();
-
-			// 全キーの入力状態を取得する
-			BYTE key[256] = {};
-			keyboard->GetDeviceState(sizeof(key), key);
+			// 入力の更新
+			input->Update();
 
 			// 使い方サンプル：数字の0キーが押されていたら
 			if (key[DIK_0]) {
@@ -1486,7 +1479,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// SoundData.pBufferはnewしたメモリなので自分でdeleteする必要がある
 	SoundUnload(&soundDataMokugyo);
 
-	
+	// 入力解放
 	delete input;
 
 	// ComPtrがスコープを抜けるときに自動的にReleaseしてくれるので、
