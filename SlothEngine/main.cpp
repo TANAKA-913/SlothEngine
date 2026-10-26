@@ -43,9 +43,6 @@
 
 using Microsoft::WRL::ComPtr; // ComPtrを使いやすくする
 
-const int32_t kClientWidth  = 1280;
-const int32_t kClientHeight = 720;
-
 struct Vector2 { float x, y; };
 struct Vector4 { float x, y, z, w; };
 
@@ -708,14 +705,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	ComPtr<IDXGISwapChain4> swapChain;
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
-	swapChainDesc.Width       = kClientWidth;
-	swapChainDesc.Height      = kClientHeight;
+	swapChainDesc.Width       = WinApp::kClientWidth;
+	swapChainDesc.Height      = WinApp::kClientHeight;
 	swapChainDesc.Format      = DXGI_FORMAT_R8G8B8A8_UNORM;
 	swapChainDesc.SampleDesc.Count = 1;
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.BufferCount = 2;
 	swapChainDesc.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr,
+	hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue.Get(), winApp->GetHwnd(), &swapChainDesc, nullptr, nullptr,
 	                                          reinterpret_cast<IDXGISwapChain1**>(swapChain.GetAddressOf()));
 	assert(SUCCEEDED(hr));
 
@@ -782,7 +779,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// 入力の初期化
 	input = new Input();
-	input->Initialize(wc.hInstance, hwnd);
+	input->Initialize(winApp->GetHInstance(), winApp->GetHwnd());
 	
 	const uint32_t desriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	const uint32_t desriptorSizeRTV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -841,7 +838,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 
 
-	ComPtr<ID3D12Resource> depthStencilResource = CreateDepthStencilTextureResource(device, kClientWidth, kClientHeight);
+	ComPtr<ID3D12Resource> depthStencilResource = CreateDepthStencilTextureResource(device, WinApp::kClientWidth, WinApp::kClientHeight);
 
 	ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap;
 	D3D12_DESCRIPTOR_HEAP_DESC dsvDescriptorHeapDesc{};
@@ -878,7 +875,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
-	ImGui_ImplWin32_Init(hwnd);
+	ImGui_ImplWin32_Init(winApp->GetHwnd());
 	ImGui_ImplDX12_Init(device.Get(), 2, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
 	                     srvDescriptorHeap.Get(),
 	                     srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
@@ -1149,14 +1146,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// ビューポートとシザー矩形
 	D3D12_VIEWPORT viewport{};
-	viewport.Width    = kClientWidth;
-	viewport.Height   = kClientHeight;
+	viewport.Width    = WinApp::kClientWidth;
+	viewport.Height   = WinApp::kClientHeight;
 	viewport.MinDepth = 0.0f;
 	viewport.MaxDepth = 1.0f;
 
 	D3D12_RECT scissorRect{};
-	scissorRect.right  = kClientWidth;
-	scissorRect.bottom = kClientHeight;
+	scissorRect.right  = WinApp::kClientWidth;
+	scissorRect.bottom = WinApp::kClientHeight;
 
 	// ログ
 	std::filesystem::create_directory("logs");
@@ -1305,7 +1302,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			} else {
 				Matrix4x4 cameraMatrix = Math::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
 				viewMatrix             = Math::Inverse(cameraMatrix);
-				float aspectRatio      = static_cast<float>(kClientWidth) / static_cast<float>(kClientHeight);
+				float aspectRatio      = static_cast<float>(WinApp::kClientWidth) / static_cast<float>(WinApp::kClientHeight);
 				projectionMatrix       = Math::MakePerspectiveFovMatrix(0.45f, aspectRatio, 0.1f, 100.0f);
 			}
 			Matrix4x4 wvpMatrix        = Math::Multiply(worldMatrix, Math::Multiply(viewMatrix, projectionMatrix));
@@ -1319,7 +1316,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			Matrix4x4 viewMatrixSprite       = Math::MakeIdentity4x4();
 			// 【修正】nearを0にしていると、Spriteを回転させた時にZがマイナス側へ出た瞬間
 			// 　　　　クリップされて消えてしまうため、near/farを広く取っておく
-			Matrix4x4 projectionMatrixSprite = Math::MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), -1000.0f, 1000.0f);
+			Matrix4x4 projectionMatrixSprite = Math::MakeOrthographicMatrix(0.0f, 0.0f, float(WinApp::kClientWidth), float(WinApp::kClientHeight), -1000.0f, 1000.0f);
 			Matrix4x4 wvpMatrixSprite        = Math::Multiply(worldMatrixSprite, Math::Multiply(viewMatrixSprite, projectionMatrixSprite));
 			transformationDataSprite->WVP    = wvpMatrixSprite;
 			transformationDataSprite->World  = worldMatrixSprite;
@@ -1454,12 +1451,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 入力解放
 	delete input;
 
-	// WindowsAPI解放
-	delete winApp;
-
 	// ComPtrがスコープを抜けるときに自動的にReleaseしてくれるので、
 	// 手動のReleaseは全部いらなくなる。ComPtrで扱っていないものだけ解放を残すこと
-	CloseWindow(hwnd);
+	CloseWindow(winApp->GetHwnd());
+
+	// WindowsAPI解放
+	delete winApp;
 
 	} // ここで全てのComPtrが解放される（CoUninitializeより前）
 
