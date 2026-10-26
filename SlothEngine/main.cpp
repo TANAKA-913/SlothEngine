@@ -623,6 +623,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	CoInitializeEx(0, COINIT_MULTITHREADED);
 	SetUnhandledExceptionFilter(ExportDump);
 
+	// ポインタ（ブロックの外でFinalizeを呼ぶため、ブロックの外で宣言）
+	WinApp* winApp = nullptr;
+
 	{ // このブロックを抜けるときに全てのComPtrが解放されるようにする（CoUninitializeより前に解放するため）
 
 #ifdef USE_IMGUI
@@ -681,9 +684,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		infoQueue->PushStorageFilter(&filter);
 	}
 #endif
-
-	// ポインタ
-	WinApp* winApp = nullptr;
 
 	// WindowsAPIの初期化
 	winApp = new WinApp();
@@ -779,7 +779,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// 入力の初期化
 	input = new Input();
-	input->Initialize(winApp->GetHInstance(), winApp->GetHwnd());
+	input->Initialize(winApp);
 	
 	const uint32_t desriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	const uint32_t desriptorSizeRTV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -1450,16 +1450,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// 入力解放
 	delete input;
+	input = nullptr;
 
 	// ComPtrがスコープを抜けるときに自動的にReleaseしてくれるので、
 	// 手動のReleaseは全部いらなくなる。ComPtrで扱っていないものだけ解放を残すこと
-	CloseWindow(winApp->GetHwnd());
-
-	// WindowsAPI解放
-	delete winApp;
 
 	} // ここで全てのComPtrが解放される（CoUninitializeより前）
 
-	CoUninitialize();
+	// WindowsAPIの終了処理（CloseWindow と CoUninitialize）
+	winApp->Finalize();
+
+	// WindowsAPI解放
+	delete winApp;
+	winApp = nullptr;
+
 	return 0; // ここでleakCheckのDestructorが呼ばれ、正しくリークチェックが行われる
 }
