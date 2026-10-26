@@ -19,6 +19,8 @@ public: // メンバ関数
 	void Update();
 	// 終了
 	void Finalize();
+	// メッセージの処理
+	bool ProcessMessage();
 
 	// getter
 	HWND GetHwnd() const { return hwnd; }

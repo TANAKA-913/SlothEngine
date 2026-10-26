@@ -1184,244 +1184,244 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// デバッグカメラが有効かどうか（Enter or Spaceで切り替える）
 	bool isDebugCameraActive = false;
 
-	MSG msg{};
-	while (msg.message != WM_QUIT) {
-		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		} else {
-			// =====================================================================
-			// DirectX毎フレーム処理の先頭：キーボード情報の取得
-			// =====================================================================
-			// 入力の更新
-			input->Update();
-
-			// 使い方サンプル：数字の0キーが押されていたら
-			if (input->PushKey(DIK_0)) { // 数字の0キーが押されていたら
-				OutputDebugStringA("Hit 0\n"); // 出力ウィンドウに「Hit 0」と表示
-			}
-
-			// =====================================================================
-			// Enter or Spaceでデバッグカメラの有効・無効を切り替える
-			// （押した瞬間だけ反応させるため、TriggerKeyを使う）
-			// =====================================================================
-			if (input->TriggerKey(DIK_RETURN) || input->TriggerKey(DIK_SPACE)) {
-				isDebugCameraActive = !isDebugCameraActive;
-			}
-
-			// デバッグカメラが有効なら、入力を渡して更新する
-			if (isDebugCameraActive) {
-				debugCamera.Update(input);
-			}
-
-#ifdef USE_IMGUI
-			ImGui_ImplDX12_NewFrame();
-			ImGui_ImplWin32_NewFrame();
-			ImGui::NewFrame();
-			// =====================================================================
-			// 3Dオブジェクト関連の設定を1つの「Settings」ウィンドウにまとめる
-			// 　　　　CollapsingHeaderで項目ごとに折りたたみ表示できるようにする
-			// =====================================================================
-			ImGui::Begin("Settings");
-
-			// 球とobjモデルの描画切り替え
-			if (ImGui::CollapsingHeader("Draw Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
-				if (ImGui::RadioButton("Sphere", isDrawSphere)) { isDrawSphere = true; }
-				ImGui::SameLine();
-				if (ImGui::RadioButton("Obj", !isDrawSphere))   { isDrawSphere = false; }
-			}
-
-			// 自動回転の代わりにImGuiでTransformを操作できるようにする
-			if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::DragFloat3("Translate", &transform.translate.x, 0.01f);
-				ImGui::DragFloat3("Rotate", &transform.rotate.x, 0.01f);
-				ImGui::DragFloat3("Scale", &transform.scale.x, 0.01f);
-			}
-
-			// 3Dオブジェクト（球/objモデル）のMaterial編集
-			// モデル描画のLighting方式を None / Lambert / HalfLambert の
-			// 3つから動的に切り替えられるようにする
-			if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::ColorEdit4("color", &materialData->color.x);
-				ImGui::Combo("Lighting", &materialData->enableLighting, kLightingModeNames, _countof(kLightingModeNames));
-			}
-
-			// ImGuiでライト設定を変更できるようにする
-			if (ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::ColorEdit4("color##light", &directionalLightData->color.x); // Materialのcolorと名前が被るため##light
-				ImGui::SliderFloat3("direction", &directionalLightData->direction.x, -1.0f, 1.0f);
-				ImGui::SliderFloat("intensity", &directionalLightData->intensity, 0.0f, 1.0f);
-			}
-
-			ImGui::End();
-
-			// =====================================================================
-			// Sprite・Sound関連の設定を1つの「Sprite / Sound」ウィンドウにまとめる
-			// =====================================================================
-			ImGui::Begin("Sprite / Sound");
-
-			// SpriteのTransform（SRT）編集 ＋ 描画のオンオフ
-			if (ImGui::CollapsingHeader("Sprite Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::Checkbox("Draw Sprite", &isDrawSprite); // Spriteの描画on/off
-				ImGui::DragFloat3("Translate##sprite", &transformSprite.translate.x, 1.0f);
-				ImGui::DragFloat3("Rotate##sprite", &transformSprite.rotate.x, 0.01f);
-				ImGui::DragFloat3("Scale##sprite", &transformSprite.scale.x, 0.01f);
-			}
-
-			// Sprite用UVTransformの編集
-			if (ImGui::CollapsingHeader("UVTransform", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::DragFloat2("UVTranslate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
-				ImGui::DragFloat2("UVScale", &uvTransformSprite.scale.x, 0.01f, -10.0f, 10.0f);
-				ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
-			}
-
-			// ボタンを押すたびに一度だけ音声を再生する
-			if (ImGui::CollapsingHeader("Sound", ImGuiTreeNodeFlags_DefaultOpen)) {
-				if (ImGui::Button("Play")) {
-					SoundPlayWave(xAudio2.Get(), soundDataMokugyo);
-				}
-			}
-
-			ImGui::End();
-#endif
-
-			// Update
-			// Update
-			// 自動回転は廃止（ImGuiのTransformパネルで手動操作）
-
-			// ワールド行列
-			Matrix4x4 worldMatrix = Math::MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
-
-			// ビュー・プロジェクション行列
-			// デバッグカメラが有効な場合はそちらの行列を使う
-			Matrix4x4 viewMatrix;
-			Matrix4x4 projectionMatrix;
-			if (isDebugCameraActive) {
-				viewMatrix       = debugCamera.viewMatrix_;
-				projectionMatrix = debugCamera.projectionMatrix_;
-			} else {
-				Matrix4x4 cameraMatrix = Math::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
-				viewMatrix             = Math::Inverse(cameraMatrix);
-				float aspectRatio      = static_cast<float>(WinApp::kClientWidth) / static_cast<float>(WinApp::kClientHeight);
-				projectionMatrix       = Math::MakePerspectiveFovMatrix(0.45f, aspectRatio, 0.1f, 100.0f);
-			}
-			Matrix4x4 wvpMatrix        = Math::Multiply(worldMatrix, Math::Multiply(viewMatrix, projectionMatrix));
-
-			// WVPとWorldの両方を転送
-			transformationData->WVP   = wvpMatrix;
-			transformationData->World = worldMatrix;
-
-			// Sprite用行列更新
-			Matrix4x4 worldMatrixSprite      = Math::MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
-			Matrix4x4 viewMatrixSprite       = Math::MakeIdentity4x4();
-			// 【修正】nearを0にしていると、Spriteを回転させた時にZがマイナス側へ出た瞬間
-			// 　　　　クリップされて消えてしまうため、near/farを広く取っておく
-			Matrix4x4 projectionMatrixSprite = Math::MakeOrthographicMatrix(0.0f, 0.0f, float(WinApp::kClientWidth), float(WinApp::kClientHeight), -1000.0f, 1000.0f);
-			Matrix4x4 wvpMatrixSprite        = Math::Multiply(worldMatrixSprite, Math::Multiply(viewMatrixSprite, projectionMatrixSprite));
-			transformationDataSprite->WVP    = wvpMatrixSprite;
-			transformationDataSprite->World  = worldMatrixSprite;
-
-			// Sprite用UVTransform行列の生成（SRTの順で合成）
-			Matrix4x4 uvTransformMatrix = Math::MakeScaleMatrix(uvTransformSprite.scale);
-			uvTransformMatrix           = Math::Multiply(uvTransformMatrix, Math::MakeRotateZMatrix(uvTransformSprite.rotate.z));
-			uvTransformMatrix           = Math::Multiply(uvTransformMatrix, Math::MakeTranslateMatrix(uvTransformSprite.translate));
-			materialDataSprite->uvTransform = uvTransformMatrix;
-
-#ifdef USE_IMGUI
-			ImGui::Render();
-#endif
-
-			// --- 描画開始 ---
-			UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
-
-			D3D12_RESOURCE_BARRIER barrier{};
-			barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource   = swapChainResources[backBufferIndex].Get();
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-			barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			commandList->ResourceBarrier(1, &barrier);
-
-			commandList->OMSetRenderTargets(1, &rtvHandles[backBufferIndex], false, &dsvHandle);
-			float clearColor[] = {0.1f, 0.25f, 0.5f, 1.0f};
-			commandList->ClearRenderTargetView(rtvHandles[backBufferIndex], clearColor, 0, nullptr);
-			commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
-			commandList->RSSetViewports(1, &viewport);
-			commandList->RSSetScissorRects(1, &scissorRect);
-			commandList->SetGraphicsRootSignature(rootSignature.Get());
-			commandList->SetPipelineState(graphicsPipelineState.Get());
-
-			ID3D12DescriptorHeap* descriptorHeaps[] = {srvDescriptorHeap.Get()};
-			commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-
-			// 平行光源をRootParameter[3]にセット（毎フレーム共通）
-			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
-
-			// -----------------------------------------------------------------
-			// ① 3Dオブジェクト（球 or モンスターボール）の描画
-			// 　　ImGuiのDraw Modeウィンドウで選んだ方を描画する
-			// -----------------------------------------------------------------
-			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
-			commandList->SetGraphicsRootConstantBufferView(1, transformationResource->GetGPUVirtualAddress());
-			if (isDrawSphere) {
-				// 球はmtlテクスチャを持たないのでuvChecker.pngを使う
-				commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSphere);
-				commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-				commandList->DrawInstanced(UINT(sphereVertices.size()), 1, 0, 0);
-			} else {
-				// objモデルはmtlで指定されたテクスチャを使う
-				commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2);
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewObj);
-				commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-				commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
-			}
-
-			// -----------------------------------------------------------------
-			// ② Spriteの描画（ライティングなし）
-			// 　　isDrawSpriteがfalseのときは描画自体をスキップする
-			// -----------------------------------------------------------------
-			if (isDrawSprite) {
-				// 　深度テストなしのSprite専用PSOに切り替える
-				commandList->SetPipelineState(spriteGraphicsPipelineState.Get());
-				commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress()); // Sprite用マテリアル
-				commandList->SetGraphicsRootConstantBufferView(1, transformationResourceSprite->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
-				commandList->IASetIndexBuffer(&indexBufferViewSprite);
-				commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
-			}
-
-#ifdef USE_IMGUI
-			commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
-#endif
-
-			// --- 描画終了 ---
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PRESENT;
-			commandList->ResourceBarrier(1, &barrier);
-
-			hr = commandList->Close(); assert(SUCCEEDED(hr));
-			ID3D12CommandList* commandLists[] = {commandList.Get()};
-			commandQueue->ExecuteCommandLists(1, commandLists);
-
-			swapChain->Present(1, 0);
-
-			fenceValue++;
-			commandQueue->Signal(fence.Get(), fenceValue);
-			if (fence->GetCompletedValue() < fenceValue) {
-				fence->SetEventOnCompletion(fenceValue, fenceEvent);
-				WaitForSingleObject(fenceEvent, INFINITE);
-			}
-
-			hr = commandAllocator->Reset(); assert(SUCCEEDED(hr));
-			hr = commandList->Reset(commandAllocator.Get(), nullptr); assert(SUCCEEDED(hr));
-
-
-			logFile << "Loop running..." << std::endl;
+	while (true) { // ゲームループ
+		// Windowsのメッセージ処理
+		if (winApp->ProcessMessage()) {
+			// ゲームループを抜ける
+			break;
 		}
+
+		// =====================================================================
+		// DirectX毎フレーム処理の先頭：キーボード情報の取得
+		// =====================================================================
+		// 入力の更新
+		input->Update();
+
+		// 使い方サンプル：数字の0キーが押されていたら
+		if (input->PushKey(DIK_0)) { // 数字の0キーが押されていたら
+			OutputDebugStringA("Hit 0\n"); // 出力ウィンドウに「Hit 0」と表示
+		}
+
+		// =====================================================================
+		// Enter or Spaceでデバッグカメラの有効・無効を切り替える
+		// （押した瞬間だけ反応させるため、TriggerKeyを使う）
+		// =====================================================================
+		if (input->TriggerKey(DIK_RETURN) || input->TriggerKey(DIK_SPACE)) {
+			isDebugCameraActive = !isDebugCameraActive;
+		}
+
+		// デバッグカメラが有効なら、入力を渡して更新する
+		if (isDebugCameraActive) {
+			debugCamera.Update(input);
+		}
+
+#ifdef USE_IMGUI
+		ImGui_ImplDX12_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+		// =====================================================================
+		// 3Dオブジェクト関連の設定を1つの「Settings」ウィンドウにまとめる
+		// 　　　　CollapsingHeaderで項目ごとに折りたたみ表示できるようにする
+		// =====================================================================
+		ImGui::Begin("Settings");
+
+		// 球とobjモデルの描画切り替え
+		if (ImGui::CollapsingHeader("Draw Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
+			if (ImGui::RadioButton("Sphere", isDrawSphere)) { isDrawSphere = true; }
+			ImGui::SameLine();
+			if (ImGui::RadioButton("Obj", !isDrawSphere))   { isDrawSphere = false; }
+		}
+
+		// 自動回転の代わりにImGuiでTransformを操作できるようにする
+		if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::DragFloat3("Translate", &transform.translate.x, 0.01f);
+			ImGui::DragFloat3("Rotate", &transform.rotate.x, 0.01f);
+			ImGui::DragFloat3("Scale", &transform.scale.x, 0.01f);
+		}
+
+		// 3Dオブジェクト（球/objモデル）のMaterial編集
+		// モデル描画のLighting方式を None / Lambert / HalfLambert の
+		// 3つから動的に切り替えられるようにする
+		if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::ColorEdit4("color", &materialData->color.x);
+			ImGui::Combo("Lighting", &materialData->enableLighting, kLightingModeNames, _countof(kLightingModeNames));
+		}
+
+		// ImGuiでライト設定を変更できるようにする
+		if (ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::ColorEdit4("color##light", &directionalLightData->color.x); // Materialのcolorと名前が被るため##light
+			ImGui::SliderFloat3("direction", &directionalLightData->direction.x, -1.0f, 1.0f);
+			ImGui::SliderFloat("intensity", &directionalLightData->intensity, 0.0f, 1.0f);
+		}
+
+		ImGui::End();
+
+		// =====================================================================
+		// Sprite・Sound関連の設定を1つの「Sprite / Sound」ウィンドウにまとめる
+		// =====================================================================
+		ImGui::Begin("Sprite / Sound");
+
+		// SpriteのTransform（SRT）編集 ＋ 描画のオンオフ
+		if (ImGui::CollapsingHeader("Sprite Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::Checkbox("Draw Sprite", &isDrawSprite); // Spriteの描画on/off
+			ImGui::DragFloat3("Translate##sprite", &transformSprite.translate.x, 1.0f);
+			ImGui::DragFloat3("Rotate##sprite", &transformSprite.rotate.x, 0.01f);
+			ImGui::DragFloat3("Scale##sprite", &transformSprite.scale.x, 0.01f);
+		}
+
+		// Sprite用UVTransformの編集
+		if (ImGui::CollapsingHeader("UVTransform", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::DragFloat2("UVTranslate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
+			ImGui::DragFloat2("UVScale", &uvTransformSprite.scale.x, 0.01f, -10.0f, 10.0f);
+			ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
+		}
+
+		// ボタンを押すたびに一度だけ音声を再生する
+		if (ImGui::CollapsingHeader("Sound", ImGuiTreeNodeFlags_DefaultOpen)) {
+			if (ImGui::Button("Play")) {
+				SoundPlayWave(xAudio2.Get(), soundDataMokugyo);
+			}
+		}
+
+		ImGui::End();
+#endif
+
+		// Update
+		// Update
+		// 自動回転は廃止（ImGuiのTransformパネルで手動操作）
+
+		// ワールド行列
+		Matrix4x4 worldMatrix = Math::MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
+
+		// ビュー・プロジェクション行列
+		// デバッグカメラが有効な場合はそちらの行列を使う
+		Matrix4x4 viewMatrix;
+		Matrix4x4 projectionMatrix;
+		if (isDebugCameraActive) {
+			viewMatrix       = debugCamera.viewMatrix_;
+			projectionMatrix = debugCamera.projectionMatrix_;
+		} else {
+			Matrix4x4 cameraMatrix = Math::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
+			viewMatrix             = Math::Inverse(cameraMatrix);
+			float aspectRatio      = static_cast<float>(WinApp::kClientWidth) / static_cast<float>(WinApp::kClientHeight);
+			projectionMatrix       = Math::MakePerspectiveFovMatrix(0.45f, aspectRatio, 0.1f, 100.0f);
+		}
+		Matrix4x4 wvpMatrix        = Math::Multiply(worldMatrix, Math::Multiply(viewMatrix, projectionMatrix));
+
+		// WVPとWorldの両方を転送
+		transformationData->WVP   = wvpMatrix;
+		transformationData->World = worldMatrix;
+
+		// Sprite用行列更新
+		Matrix4x4 worldMatrixSprite      = Math::MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
+		Matrix4x4 viewMatrixSprite       = Math::MakeIdentity4x4();
+		// 【修正】nearを0にしていると、Spriteを回転させた時にZがマイナス側へ出た瞬間
+		// 　　　　クリップされて消えてしまうため、near/farを広く取っておく
+		Matrix4x4 projectionMatrixSprite = Math::MakeOrthographicMatrix(0.0f, 0.0f, float(WinApp::kClientWidth), float(WinApp::kClientHeight), -1000.0f, 1000.0f);
+		Matrix4x4 wvpMatrixSprite        = Math::Multiply(worldMatrixSprite, Math::Multiply(viewMatrixSprite, projectionMatrixSprite));
+		transformationDataSprite->WVP    = wvpMatrixSprite;
+		transformationDataSprite->World  = worldMatrixSprite;
+
+		// Sprite用UVTransform行列の生成（SRTの順で合成）
+		Matrix4x4 uvTransformMatrix = Math::MakeScaleMatrix(uvTransformSprite.scale);
+		uvTransformMatrix           = Math::Multiply(uvTransformMatrix, Math::MakeRotateZMatrix(uvTransformSprite.rotate.z));
+		uvTransformMatrix           = Math::Multiply(uvTransformMatrix, Math::MakeTranslateMatrix(uvTransformSprite.translate));
+		materialDataSprite->uvTransform = uvTransformMatrix;
+
+#ifdef USE_IMGUI
+		ImGui::Render();
+#endif
+
+		// --- 描画開始 ---
+		UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
+
+		D3D12_RESOURCE_BARRIER barrier{};
+		barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		barrier.Transition.pResource   = swapChainResources[backBufferIndex].Get();
+		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+		barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		commandList->ResourceBarrier(1, &barrier);
+
+		commandList->OMSetRenderTargets(1, &rtvHandles[backBufferIndex], false, &dsvHandle);
+		float clearColor[] = {0.1f, 0.25f, 0.5f, 1.0f};
+		commandList->ClearRenderTargetView(rtvHandles[backBufferIndex], clearColor, 0, nullptr);
+		commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+		commandList->RSSetViewports(1, &viewport);
+		commandList->RSSetScissorRects(1, &scissorRect);
+		commandList->SetGraphicsRootSignature(rootSignature.Get());
+		commandList->SetPipelineState(graphicsPipelineState.Get());
+
+		ID3D12DescriptorHeap* descriptorHeaps[] = {srvDescriptorHeap.Get()};
+		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
+		// 平行光源をRootParameter[3]にセット（毎フレーム共通）
+		commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
+
+		// -----------------------------------------------------------------
+		// ① 3Dオブジェクト（球 or モンスターボール）の描画
+		// 　　ImGuiのDraw Modeウィンドウで選んだ方を描画する
+		// -----------------------------------------------------------------
+		commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
+		commandList->SetGraphicsRootConstantBufferView(1, transformationResource->GetGPUVirtualAddress());
+		if (isDrawSphere) {
+			// 球はmtlテクスチャを持たないのでuvChecker.pngを使う
+			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSphere);
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			commandList->DrawInstanced(UINT(sphereVertices.size()), 1, 0, 0);
+		} else {
+			// objモデルはmtlで指定されたテクスチャを使う
+			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2);
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewObj);
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
+		}
+
+		// -----------------------------------------------------------------
+		// ② Spriteの描画（ライティングなし）
+		// 　　isDrawSpriteがfalseのときは描画自体をスキップする
+		// -----------------------------------------------------------------
+		if (isDrawSprite) {
+			// 　深度テストなしのSprite専用PSOに切り替える
+			commandList->SetPipelineState(spriteGraphicsPipelineState.Get());
+			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress()); // Sprite用マテリアル
+			commandList->SetGraphicsRootConstantBufferView(1, transformationResourceSprite->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
+			commandList->IASetIndexBuffer(&indexBufferViewSprite);
+			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+		}
+
+#ifdef USE_IMGUI
+		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
+#endif
+
+		// --- 描画終了 ---
+		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PRESENT;
+		commandList->ResourceBarrier(1, &barrier);
+
+		hr = commandList->Close(); assert(SUCCEEDED(hr));
+		ID3D12CommandList* commandLists[] = {commandList.Get()};
+		commandQueue->ExecuteCommandLists(1, commandLists);
+
+		swapChain->Present(1, 0);
+
+		fenceValue++;
+		commandQueue->Signal(fence.Get(), fenceValue);
+		if (fence->GetCompletedValue() < fenceValue) {
+			fence->SetEventOnCompletion(fenceValue, fenceEvent);
+			WaitForSingleObject(fenceEvent, INFINITE);
+		}
+
+		hr = commandAllocator->Reset(); assert(SUCCEEDED(hr));
+		hr = commandList->Reset(commandAllocator.Get(), nullptr); assert(SUCCEEDED(hr));
+
+
+		logFile << "Loop running..." << std::endl;
 	}
 
 	CloseHandle(fenceEvent);

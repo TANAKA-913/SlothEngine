@@ -51,3 +51,23 @@ void WinApp::Finalize()
 	CloseWindow(hwnd);
 	CoUninitialize();
 }
+
+bool WinApp::ProcessMessage()
+{
+	MSG msg{};
+
+	// Windowsにメッセージが来ていたら最優先で処理させる
+	if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+
+	// 終了メッセージが来たらtrueを返す（ゲームループを抜ける合図）
+	if (msg.message == WM_QUIT)
+	{
+		return true;
+	}
+
+	return false;
+}
