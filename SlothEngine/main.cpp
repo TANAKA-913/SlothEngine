@@ -1,4 +1,3 @@
-#include <Windows.h>
 #include <wrl.h>
 #include <cstdint>
 #include <format>
@@ -15,12 +14,12 @@
 #include "externals/DirectXTex/d3dx12.h"
 #include "externals/DirectXTex/DirectXTex.h"
 #include "Input.h"
+#include "WinApp.h"
 
 #ifdef USE_IMGUI
 #include "externals/imgui/imgui.h"
 #include "externals/imgui/imgui_impl_dx12.h"
 #include "externals/imgui/imgui_impl_win32.h"
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #endif
 
 #include <cassert>
@@ -140,19 +139,6 @@ struct SoundData
 	unsigned int bufferSize;
 };
 
-
-// ウィンドウプロシージャ
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-#ifdef USE_IMGUI
-	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) { return true; }
-#endif
-	switch (msg) {
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		return 0;
-	}
-	return DefWindowProc(hwnd, msg, wparam, lparam);
-}
 
 void Log(const std::string& message)  { OutputDebugStringA(message.c_str()); }
 void Log(const std::wstring& message) { OutputDebugStringW(message.c_str()); }
@@ -699,21 +685,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	}
 #endif
 
-	WNDCLASS wc{};
-	wc.lpfnWndProc   = WindowProc;
-	wc.lpszClassName = L"CG2WindowClass";
-	wc.hInstance     = GetModuleHandle(nullptr);
-	wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
-	if (!RegisterClass(&wc)) { return -1; }
+	// ポインタ
+	WinApp* winApp = nullptr;
 
-	RECT wrc = {0, 0, kClientWidth, kClientHeight};
-	AdjustWindowRect(&wrc, WS_OVERLAPPEDWINDOW, false);
-	HWND hwnd = CreateWindow(wc.lpszClassName, L"CG2", WS_OVERLAPPEDWINDOW,
-	                          CW_USEDEFAULT, CW_USEDEFAULT,
-	                          wrc.right - wrc.left, wrc.bottom - wrc.top,
-	                          nullptr, nullptr, wc.hInstance, nullptr);
-	if (hwnd == nullptr) { return -1; }
-	ShowWindow(hwnd, SW_SHOW);
+	// WindowsAPIの初期化
+	winApp = new WinApp();
+	winApp->Initialize();
 
 	ComPtr<ID3D12CommandQueue> commandQueue;
 	D3D12_COMMAND_QUEUE_DESC commandQueueDesc{};
@@ -1476,6 +1453,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// 入力解放
 	delete input;
+
+	// WindowsAPI解放
+	delete winApp;
 
 	// ComPtrがスコープを抜けるときに自動的にReleaseしてくれるので、
 	// 手動のReleaseは全部いらなくなる。ComPtrで扱っていないものだけ解放を残すこと
